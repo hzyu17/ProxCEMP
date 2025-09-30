@@ -1,0 +1,54 @@
+<mujoco model="robot_with_obstacles">
+  <compiler angle="radian"/>
+
+  <visual>
+    <scale framelength="0.8" framewidth="0.05"/>
+  </visual>
+
+  <worldbody>
+    <geom name="floor" size="0 0 1" type="plane" friction="1 0.5 0.5" rgba="0.9 0.9 0.9 1"/>
+    <camera name="overhead" pos="0 -5 4" quat="0.707107 -0.707107 0 0"/>
+
+    <body name="robot_body" pos="0 0 0.5">
+      <joint name="x_joint" pos="0 0 0" axis="1 0 0" type="slide"/>
+      <joint name="y_joint" pos="0 0 0" axis="0 1 0" type="slide"/>
+      <joint name="z_joint" pos="0 0 0" axis="0 0 1" type="slide"/>
+
+      <geom name="robot_geom" size="0.5" mass="1" rgba="0 1 0 1"/>
+      <site name="robot_center_site" pos="0 0 0" size="0.1" rgba="1 0 0 0.5"/>
+
+        <!-- Robot body coordinate frame -->
+        <geom name="robot_x_axis" type="cylinder" size="0.002 0.15" pos="0.15 0 0" euler="0 90 0" 
+            rgba="1 0 0 0.8" contype="0" conaffinity="0" />
+        <geom name="robot_y_axis" type="cylinder" size="0.002 0.15" pos="0 0.15 0" euler="90 0 0" 
+            rgba="0 1 0 0.8" contype="0" conaffinity="0" />
+        <geom name="robot_z_axis" type="cylinder" size="0.002 0.15" pos="0 0 0.15" euler="0 0 0" 
+            rgba="0 0 1 0.8" contype="0" conaffinity="0" />
+        
+        <!-- Arrow tips for the axes -->
+        <geom name="robot_x_tip" type="sphere" size="0.01" pos="0.3 0 0" 
+            rgba="1 0 0 0.8" contype="0" conaffinity="0"/>
+        <geom name="robot_y_tip" type="sphere" size="0.01" pos="0 0.3 0" 
+            rgba="0 1 0 0.8" contype="0" conaffinity="0"/>
+        <geom name="robot_z_tip" type="sphere" size="0.01" pos="0 0 0.3" 
+            rgba="0 0 1 0.8" contype="0" conaffinity="0"/>
+
+    </body>
+
+    <body name="obs1_body" pos="2 2.5 1.0">
+      <geom name="obstacle_1" size="1.0" mass="0" rgba="1 0 0 1"/>
+    </body>
+    <body name="obs2_body" pos="-2 -2.5 1.8">
+      <geom name="obstacle_2" size="1.0" mass="0" rgba="1 0 0 1"/>
+    </body>
+    <body name="obs3_body" pos="3 -1.5 0.7">
+      <geom name="obstacle_3" size="1.0" mass="0" rgba="1 0 0 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <general name="force_x" joint="x_joint" ctrlrange="-10 10"/>
+    <general name="force_y" joint="y_joint" ctrlrange="-10 10"/>
+    <general name="force_z" joint="z_joint" ctrlrange="-10 10"/>
+  </actuator>
+</mujoco>

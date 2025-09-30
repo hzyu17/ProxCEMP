@@ -1,0 +1,12 @@
+Sat Sep 27 15:59:59 2025
+WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 1. The simulation is unstable. Time = 1805.5660.
+
+Sat Sep 27 15:59:59 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 3. The simulation is unstable. Time = 1806.3820.
+
+Sat Sep 27 16:00:23 2025
+WARNING: Nan, Inf or huge value in CTRL at ACTUATOR 1. The simulation is unstable. Time = 1805.5660.
+
+Sat Sep 27 16:00:23 2025
+WARNING: Nan, Inf or huge value in QACC at DOF 3. The simulation is unstable. Time = 1806.3820.
+
