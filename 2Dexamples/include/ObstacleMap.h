@@ -11,7 +11,6 @@ constexpr int MAP_WIDTH = 800;
 constexpr int MAP_HEIGHT = 600;
 constexpr int NUM_OBSTACLES = 20;
 constexpr float OBSTACLE_RADIUS = 20.0f;
-constexpr float MIN_BORDER_DIST = OBSTACLE_RADIUS;
 constexpr float TRAJECTORY_RADIUS = 10.0f; // New constant for collision checking radius
 
 // --- Structures ---

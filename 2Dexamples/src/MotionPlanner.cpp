@@ -80,6 +80,30 @@ float MotionPlanner::computeSmoothnessCost() const {
     return smoothness_cost;
 }
 
+float MotionPlanner::computeSmoothnessCost(const Trajectory& trajectory) const {
+    float smoothness_cost = 0.0f;
+    const auto& nodes = trajectory.nodes;
+    size_t N = nodes.size();
+
+    if (N < 3) return 0.0f;
+
+    // Sum of squared second differences for x and y coordinates (acceleration cost)
+    for (size_t i = 1; i < N - 1; ++i) {
+        // Second difference in x: x_{i-1} - 2x_i + x_{i+1}
+        float d2x = nodes[i - 1].x - 2.0f * nodes[i].x + nodes[i + 1].x;
+        smoothness_cost += std::pow(d2x, 2);
+    }
+
+    for (size_t i = 1; i < N - 1; ++i) {
+        // Second difference in y: y_{i-1} - 2y_i + y_{i+1}
+        float d2y = nodes[i - 1].y - 2.0f * nodes[i].y + nodes[i + 1].y;
+        smoothness_cost += std::pow(d2y, 2);
+    }
+
+    // Total smoothness cost (L2 norm of acceleration squared)
+    return smoothness_cost;
+}
+
 RMatrixDiagonals MotionPlanner::getSmoothnessMatrixRDiagonals(size_t N) const {
     // R = A^T A, where A is the finite difference matrix.
     // For physical trajectories, we scale by 1/(Δt)⁴ to account for acceleration units

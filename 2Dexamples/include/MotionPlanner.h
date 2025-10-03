@@ -64,6 +64,8 @@ public:
      */
     float computeSmoothnessCost() const;
 
+    float computeSmoothnessCost(const Trajectory& trajectory) const;
+
     /**
      * @brief Computes the non-zero diagonals of the smoothness precision matrix R = A^T * A.
      * R is an N x N pentadiagonal symmetric matrix.

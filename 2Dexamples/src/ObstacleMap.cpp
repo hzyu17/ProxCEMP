@@ -16,8 +16,8 @@ std::vector<Obstacle> generateObstacles(int count, float radius, int width, int 
     std::random_device rd;
     std::mt19937 gen(rd());
     // Define the range for obstacle centers, accounting for borders
-    std::uniform_real_distribution<> distrib_x(radius + MIN_BORDER_DIST, width - radius - MIN_BORDER_DIST);
-    std::uniform_real_distribution<> distrib_y(radius + MIN_BORDER_DIST, height - radius - MIN_BORDER_DIST);
+    std::uniform_real_distribution<> distrib_x(radius + OBSTACLE_RADIUS, width - radius - OBSTACLE_RADIUS);
+    std::uniform_real_distribution<> distrib_y(radius + OBSTACLE_RADIUS, height - radius - OBSTACLE_RADIUS);
 
     int attempts = 0;
     const int MAX_ATTEMPTS_PER_OBSTACLE = 200;

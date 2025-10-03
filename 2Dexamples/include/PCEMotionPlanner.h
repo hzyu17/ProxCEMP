@@ -5,6 +5,7 @@
 #include <iostream>
 #include <algorithm>
 #include <vector>
+#include <yaml-cpp/yaml.h> // Include the YAML-CPP header
 
 /**
  * @brief Proximal Cross-Entropy Method (PCEM) for Trajectory Optimization.
@@ -41,6 +42,13 @@ public:
             } else {
                 throw std::runtime_error("Required parameter 'temperature' not found in pce_planner section.");
             }
+
+            if (planner_config["eta"]) {
+                eta_ = planner_config["eta"].as<float>();
+                gamma_ = eta_ / (eta_ + 1);
+            } else {
+                throw std::runtime_error("Required parameter 'eta' not found in pce_planner section.");
+            }
             
             if (planner_config["convergence_threshold"]) {
                 convergence_threshold_ = planner_config["convergence_threshold"].as<float>();
@@ -73,6 +81,8 @@ public:
                   << "  num_samples: " << num_samples_ << "\n"
                   << "  num_iterations: " << num_iterations_ << "\n"
                   << "  temperature: " << temperature_ << "\n"
+                  << "  eta: " << eta_ << "\n"
+                  << "  gamma: " << gamma_ << "\n"
                   << "  convergence_threshold: " << convergence_threshold_ << "\n"
                   << "  epsilon_sdf: " << epsilon_sdf_ << "\n"
                   << "  sigma_obs: " << sigma_obs_ << "\n";
@@ -83,18 +93,24 @@ public:
      */
     bool optimize() override {
         std::cout << "\n--- Starting PCEM Optimization ---\n";
-        std::cout << "Update Rule: Y_{k+1} = Σ w_m (Y_k + ε_m), where ε_m ~ N(0, R^{-1})\n\n";
+        std::cout << "Update Rule: Y_{k+1} = Σ w_m S(Y_k + ε_m), where ε_m ~ N(0, R^{-1})\n\n";
         
         const size_t N = current_trajectory_.nodes.size();
         const size_t M = num_samples_;  // Number of Monte Carlo samples (e.g., 100-500)
-        const float gamma = temperature_;  // Temperature parameter for exponential weighting
         
         // Store initial trajectory Y_0 (Iteration 0)
         storeTrajectory();
-        float cost = computeCollisionCost(current_trajectory_, obstacles_);
-        std::cout << "Iteration 0: Initial Cost = " << cost << "\n";
+        float cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
         
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
+
+            std::cout << "------- Iteration " << iteration << " : Cost = " << cost << "------ \n";
+
+            float collision_cost = computeCollisionCost(current_trajectory_, obstacles_);
+            float smoothness_cost = computeSmoothnessCost(current_trajectory_);
+            std::cout << "Collision cost: " << collision_cost 
+                    << ", Smoothness cost: " << smoothness_cost << "\n";
+                    
             std::cout << "Iteration " << iteration << " - Sampling " << M << " trajectories...\n";
             
             // --- Step 1: Sample M noise vectors ---
@@ -146,7 +162,7 @@ public:
                 float bias_correction = bias_x + bias_y;
                 
                 // Compute exponent: -gamma * (S(Y_k + epsilon_m) - epsilon_m^T R^{-1} Y_k)
-                float exponent = -gamma * (collision_cost - bias_correction);
+                float exponent = -gamma_ * (collision_cost - bias_correction);
                 
                 // Track maximum for numerical stability
                 if (exponent > max_exponent) {
@@ -155,11 +171,25 @@ public:
                 
                 weights[m] = exponent;  // Store exponent temporarily
             }
+
+            // ============ DEBUG ============
+            std::vector<float> log_weights_raw(M);
+            for (size_t m = 0; m < M; ++m) {
+                log_weights_raw[m] = weights[m]; // Save the raw log-weights before exp
+            }
+
+            // Print statistics BEFORE exp
+            float min_log_weight = *std::min_element(weights.begin(), weights.end());
+            float max_log_weight = *std::max_element(weights.begin(), weights.end());
+            std::cout << "Log-weight range: [" << min_log_weight << ", " << max_log_weight 
+                    << "], span = " << (max_log_weight - min_log_weight) << "\n";
+
+            // ============ DEBUG ============
             
             // --- Step 5: Normalize weights (subtract max for numerical stability) ---
             float weight_sum = 0.0f;
             for (size_t m = 0; m < M; ++m) {
-                weights[m] = std::exp(weights[m] - max_exponent);
+                weights[m] = std::exp((weights[m] - max_exponent) / temperature_);
                 weight_sum += weights[m];
             }
             
@@ -167,6 +197,18 @@ public:
             for (size_t m = 0; m < M; ++m) {
                 weights[m] /= weight_sum;
             }
+
+            // After normalization, check weight distribution
+            std::sort(weights.begin(), weights.end(), std::greater<float>());
+            std::cout << "Top 5 weights: ";
+            for (size_t i = 0; i < std::min(5ul, M); ++i) {
+                std::cout << weights[i] << " ";
+            }
+            std::cout << "\nBottom 5 weights: ";
+            for (size_t i = M-5; i < M; ++i) {
+                std::cout << weights[i] << " ";
+            }
+            std::cout << "\nMax weight: " << weights[0] << "\n";
             
             // --- Step 6: Compute Y_{k+1} via weighted mean update ---
             // Y_{k+1} = Σ w_m (Y_k + ε_m)
@@ -189,7 +231,7 @@ public:
             // --- Step 8: Store Y_{k+1} and check convergence ---
             // current_trajectory_ now contains Y_{k+1}, which becomes Y_k in the next iteration
             storeTrajectory();
-            float new_cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost();
+            float new_cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
             
             // Compute effective sample size (ESS) for diagnostics
             float ess = 0.0f;
@@ -210,7 +252,7 @@ public:
             cost = new_cost;
         }
         
-        std::cout << "PCEM finished. Final Cost: " << computeCollisionCost(current_trajectory_, obstacles_) << "\n";
+        std::cout << "PCEM finished. Final Cost: " << computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_) << "\n";
         return true;
     }
 
@@ -227,6 +269,8 @@ private:
     size_t num_samples_ = 100;
     size_t num_iterations_ = 10;
     float temperature_ = 1.0f;
+    float eta_ = 1.0;
+    float gamma_ = 1.0;
     float convergence_threshold_ = 0.01f;
 
     // Cost function parameters (now initialized from config)
@@ -332,9 +376,6 @@ private:
     }
 
     float computeCollisionCost(const Trajectory& traj, const std::vector<Obstacle>& obstacles) const {
-        const float epsilon_sdf = 20.0f;  // Hinge loss cut-off distance
-        const float sigma_obs = 1.0f;     // Weight for obstacle violations (Σ_obs)
-        
         float total_cost = 0.0f;
         
         // For each node in trajectory
@@ -355,10 +396,10 @@ private:
                 // h_tilde(d): Hinge loss function with cut-off epsilon_sdf
                 // h(d) = max(0, epsilon_sdf - d)
                 // This penalizes when d < epsilon_sdf (too close or in collision)
-                float hinge_loss = std::max(0.0f, epsilon_sdf - signed_distance);
+                float hinge_loss = std::max(0.0f, epsilon_sdf_ - signed_distance);
                 
                 // ||h_tilde||²_Σ: Weighted squared hinge loss
-                total_cost += sigma_obs * hinge_loss * hinge_loss;
+                total_cost += sigma_obs_ * hinge_loss * hinge_loss;
             }
         }
         
