@@ -1,2 +1,3 @@
 mujoco_env/*
 mujoco_menagerie/*
+ompl-pybullet-env/*

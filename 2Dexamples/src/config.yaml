@@ -1,0 +1,14 @@
+# config.yaml
+motion_planning:
+  initial_nodes: 100
+  initial_step_size: 8.0
+
+pce_planner:
+  num_samples: 200     # Number of Monte Carlo samples
+  num_iterations: 100   # Number of optimization iterations
+  temperature: 0.5     # Gamma parameter
+  convergence_threshold: 0.005 # Cost value to stop optimization at
+  
+  cost:
+    epsilon_sdf: 15.0  # Hinge loss cut-off distance
+    sigma_obs: 1.5     # Weight for obstacle violations

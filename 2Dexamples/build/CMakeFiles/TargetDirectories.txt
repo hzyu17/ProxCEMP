@@ -1,0 +1,3 @@
+/Users/lucasyu/git/ProxCEMP/2Dexamples/build/CMakeFiles/map_generator.dir
+/Users/lucasyu/git/ProxCEMP/2Dexamples/build/CMakeFiles/edit_cache.dir
+/Users/lucasyu/git/ProxCEMP/2Dexamples/build/CMakeFiles/rebuild_cache.dir
