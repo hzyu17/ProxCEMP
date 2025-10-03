@@ -167,8 +167,7 @@ public:
                 // Track maximum for numerical stability
                 if (exponent > max_exponent) {
                     max_exponent = exponent;
-                }
-                
+                }                
                 weights[m] = exponent;  // Store exponent temporarily
             }
 
