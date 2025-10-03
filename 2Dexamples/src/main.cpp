@@ -96,8 +96,9 @@ int main() {
 
     // Get initial motion planning parameters
     int numInitialNodes = 100;
-    float initialStepSize = 8.0f;
+    float initialTotalTime = 8.0f;
     YAML::Node config;
+    float nodeCollisionRadius = 15.0f;
 
     // Read values from config.yaml
     try {
@@ -108,9 +109,13 @@ int main() {
             if (plannerConfig["initial_nodes"]) {
                 numInitialNodes = plannerConfig["initial_nodes"].as<int>();
             }
-            if (plannerConfig["initial_step_size"]) {
-                initialStepSize = plannerConfig["initial_step_size"].as<float>();
+            if (plannerConfig["initial_total_time"]) {
+                initialTotalTime = plannerConfig["initial_total_time"].as<float>();
             }
+            if (plannerConfig["node_collision_radius"]) {
+                nodeCollisionRadius = plannerConfig["node_collision_radius"].as<float>();
+            }
+
         }
     } catch (const YAML::BadFile& e) {
         std::cerr << "Warning: Could not open config.yaml. Using default values.\n";
@@ -120,13 +125,10 @@ int main() {
 
     // Generate obstacles
     std::vector<Obstacle> obstacles = generateObstacles(NUM_OBSTACLES, OBSTACLE_RADIUS, MAP_WIDTH, MAP_HEIGHT);
-    
-    // Define explicit start and goal nodes for interpolation
-    constexpr float NODE_COLLISION_RADIUS = 15.0f;
 
     // Define a challenging start/goal that requires optimization
-    PathNode start = PathNode{50.0f, 550.0f, NODE_COLLISION_RADIUS}; // Bottom left
-    PathNode goal = PathNode{750.0f, 50.0f, NODE_COLLISION_RADIUS};  // Top right
+    PathNode start = PathNode{50.0f, 550.0f, nodeCollisionRadius}; // Bottom left
+    PathNode goal = PathNode{750.0f, 50.0f, nodeCollisionRadius};  // Top right
 
     // --- 2. Motion Planning ---
     
@@ -135,7 +137,7 @@ int main() {
 
     // 2b. Initialize a *Bezier* base trajectory (smoother start)
     // Use the values read from the config file
-    planner.initialize(start, goal, numInitialNodes, initialStepSize, InterpolationMethod::LINEAR);
+    planner.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR);
     
     std::cout << "\nStarting optimization...\n";
     // 2c. Run the optimization loop (which is simulated in PCEMotionPlanner.h)

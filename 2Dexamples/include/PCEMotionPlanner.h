@@ -189,7 +189,7 @@ public:
             // --- Step 8: Store Y_{k+1} and check convergence ---
             // current_trajectory_ now contains Y_{k+1}, which becomes Y_k in the next iteration
             storeTrajectory();
-            float new_cost = computeCollisionCost(current_trajectory_, obstacles_);
+            float new_cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost();
             
             // Compute effective sample size (ESS) for diagnostics
             float ess = 0.0f;
@@ -201,14 +201,8 @@ public:
             std::cout << "Iteration " << iteration << ": Cost = " << new_cost 
                     << ", ESS = " << ess << "/" << M << "\n";
             
-            // Check for convergence
-            if (new_cost < convergence_threshold_) {
-                std::cout << "PCEM converged! Final cost: " << new_cost << "\n";
-                return true;
-            }
-            
             // Check if cost improvement is too small
-            if (iteration > 1 && std::abs(cost - new_cost) < 1e-4f) {
+            if (iteration > 1 && std::abs(cost - new_cost) < convergence_threshold_) {
                 std::cout << "Cost improvement negligible. Stopping.\n";
                 break;
             }
