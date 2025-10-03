@@ -5,9 +5,20 @@ motion_planning:
   node_collision_radius: 12.0 
 
 pce_planner:
-  num_samples: 5000
+  num_samples: 1000
   num_iterations: 100
   eta:  0.9
+  temperature: 100
+  convergence_threshold: 0.0001
+  
+  cost:
+    epsilon_sdf: 5.0
+    sigma_obs: 0.01
+
+ngd_planner:
+  num_samples: 1000
+  num_iterations: 100
+  learning_rate:  0.9
   temperature: 100
   convergence_threshold: 0.0001
   

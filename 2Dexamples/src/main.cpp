@@ -1,28 +1,34 @@
 #include <SFML/Graphics.hpp>
 #include <iostream>
 #include <variant> 
-#include <random> // Added for RNG in visualization
+#include <random> 
 
 
 #include "../include/ObstacleMap.h" // Includes Obstacle and Map constants
 #include "../include/Trajectory.h"
 #include "../include/MotionPlanner.h" // Includes the base planner class and enums
-#include "../include/PCEMotionPlanner.h" // Includes the new PCEM planner class
+#include "../include/PCEMotionPlanner.h" // Includes the PCEM planner class
+#include "NGDMotionPlanner.h" // Includes the Natural Gradient Planner
 
 // --- Drawing Utilities ---
 
-// Function to draw a single node (circle) of the trajectory
+/**
+ * @brief Draws a single node (circle) of the trajectory.
+ */
 void drawNode(sf::RenderWindow& window, const PathNode& node, float radius, const sf::Color& color) {
     sf::CircleShape circle(radius);
     circle.setFillColor(color);
     // Set origin to center for correct positioning
     circle.setOrigin(sf::Vector2f(radius, radius));
+    // Draw without offset, since each planner now has its own window
     circle.setPosition({node.x, node.y}); 
     window.draw(circle);
 }
 
-// Function to draw the trajectory segments (lines connecting nodes)
-void drawTrajectorySegments(sf::RenderWindow& window, const Trajectory& trajectory, const sf::Color& color = sf::Color(50, 50, 200, 200)) {
+/**
+ * @brief Draws the trajectory segments (lines connecting nodes).
+ */
+void drawTrajectorySegments(sf::RenderWindow& window, const Trajectory& trajectory, const sf::Color& color) {
     if (trajectory.nodes.size() < 2) return;
 
     // Use sf::PrimitiveType::LineStrip for SFML 3.x compatibility
@@ -35,14 +41,12 @@ void drawTrajectorySegments(sf::RenderWindow& window, const Trajectory& trajecto
 }
 
 /**
- * @brief Visualizes the entire optimization history stored in the MotionPlanner.
- * It draws older trajectories transparently and the final trajectory vividly.
+ * @brief Draws the entire optimization history for a single planner in the current viewport.
  * @param window The SFML window for drawing.
  * @param planner The MotionPlanner object containing the history.
  */
 void visualizeOptimizationHistory(sf::RenderWindow& window, const MotionPlanner& planner) {
-    window.clear(sf::Color(240, 240, 240));
-
+    
     // Draw obstacles
     const std::vector<Obstacle>& obstacles = planner.getObstacles();
     for (const auto& obs : obstacles) {
@@ -57,17 +61,13 @@ void visualizeOptimizationHistory(sf::RenderWindow& window, const MotionPlanner&
     size_t num_iterations = history.size();
     
     if (num_iterations == 0) {
-        std::cout << "No trajectory history to display.\n";
-        window.display();
         return;
     }
 
-    // Draw all historical trajectories (except the last one) with increasing transparency
+    // Draw historical trajectories with increasing transparency (except the last one)
     for (size_t i = 0; i < num_iterations - 1; ++i) {
         // Calculate a transparency factor: older paths are more transparent.
-        // Alpha ranges from 5 (oldest) to 150 (second-to-last).
         float alpha_float = 5.0f + (145.0f * (float)i / (num_iterations - 2));
-        // FIX: Use unsigned char for the 8-bit color component, which is compatible with sf::Color.
         unsigned char alpha = static_cast<unsigned char>(alpha_float); 
         
         sf::Color history_color(50, 50, 255, alpha); // Fading blue
@@ -85,13 +85,40 @@ void visualizeOptimizationHistory(sf::RenderWindow& window, const MotionPlanner&
         drawNode(window, start_node, 5.0f, sf::Color::Green);
         drawNode(window, goal_node, 5.0f, sf::Color::Red);
     }
+}
 
-    window.display();
+/**
+ * @brief Opens an SFML window to display the results for a single planner.
+ * This function is blocking and will return when the window is closed.
+ * @param planner The motion planner whose history to display.
+ * @param title The title of the window.
+ */
+void showPlannerWindow(const MotionPlanner& planner, const std::string& title) {
+    // Setup SFML window
+    sf::RenderWindow window(sf::VideoMode({MAP_WIDTH, MAP_HEIGHT}), title, sf::Style::Titlebar | sf::Style::Close);
+    window.setFramerateLimit(60);
+
+    // Main Loop (Static Display)
+    while (window.isOpen()) {
+        // Event handling
+        while (const auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+            }
+        }
+        
+        window.clear(sf::Color(240, 240, 240));
+        visualizeOptimizationHistory(window, planner);
+        window.display();
+    }
 }
 
 
 int main() {
     // --- 1. Setup ---
+
+    // Define the visualization constants (no longer needed, but keeping MAP_HEIGHT_CONST unused for clarity)
+    const float MAP_HEIGHT_CONST = MAP_HEIGHT;
 
     // Get initial motion planning parameters
     int numInitialNodes = 100;
@@ -114,7 +141,6 @@ int main() {
             if (plannerConfig["node_collision_radius"]) {
                 nodeCollisionRadius = plannerConfig["node_collision_radius"].as<float>();
             }
-
         }
     } catch (const YAML::BadFile& e) {
         std::cerr << "Warning: Could not open config.yaml. Using default values.\n";
@@ -122,48 +148,39 @@ int main() {
         std::cerr << "Error parsing config.yaml: " << e.what() << ". Using default values.\n";
     }
 
-    // Generate obstacles
+    // Generate obstacles once for both planners
     std::vector<Obstacle> obstacles = generateObstacles(NUM_OBSTACLES, OBSTACLE_RADIUS, MAP_WIDTH, MAP_HEIGHT);
 
-    // Define a challenging start/goal that requires optimization
+    // Define the start/goal points
     PathNode start = PathNode{50.0f, 550.0f, nodeCollisionRadius}; // Bottom left
     PathNode goal = PathNode{750.0f, 50.0f, nodeCollisionRadius};  // Top right
 
-    // --- 2. Motion Planning ---
     
-    // 2a. Initialize the PCEM planner with the obstacle map
-    ProximalCrossEntropyMotionPlanner planner(obstacles, config);
+    // --- 2. Motion Planning - PCEM ---
+    std::cout << "\n--- Starting PCEM Planner ---\n";
+    ProximalCrossEntropyMotionPlanner planner_pce(obstacles, config);
+    planner_pce.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR);
+    bool success_pce = planner_pce.optimize();
+    // FIX: Explicitly call the base class version to avoid name hiding issues.
+    std::cout << "PCEM Optimization finished. Cost: " << planner_pce.MotionPlanner::computeCollisionCost(obstacles) + planner_pce.computeSmoothnessCost() << "\n";
 
-    // 2b. Initialize a *Bezier* base trajectory (smoother start)
-    // Use the values read from the config file
-    planner.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR);
+    // --- 3. Motion Planning - NGD ---
+    std::cout << "\n--- Starting NGD Planner ---\n";
+    NGDMotionPlanner planner_ngd(obstacles, config);
+    // Initialize NGD with the same initial trajectory
+    planner_ngd.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR);
+    bool success_ngd = planner_ngd.optimize();
+    // FIX: Explicitly call the base class version to avoid name hiding issues.
+    std::cout << "NGD Optimization finished. Cost: " << planner_ngd.MotionPlanner::computeCollisionCost(obstacles) + planner_ngd.computeSmoothnessCost() << "\n";
+
+
+    // --- 4. Optimization History Visualization (Sequential Windows) ---
     
-    std::cout << "\nStarting optimization...\n";
-    // 2c. Run the optimization loop (which is simulated in PCEMotionPlanner.h)
-    bool success = planner.optimize();
+    // Show PCEM results first. This window will block until closed.
+    showPlannerWindow(planner_pce, "PCEM Motion Planner Results");
 
-    std::cout << "Optimization finished. Success: " << (success ? "True" : "False") << "\n";
-
-    // --- 3. Optimization History Visualization ---
-    
-    // Setup SFML window
-    sf::RenderWindow window(sf::VideoMode({MAP_WIDTH, MAP_HEIGHT}), "2D Motion Planning History", sf::Style::Titlebar | sf::Style::Close);
-    window.setFramerateLimit(60);
-
-    // Call the history visualization function once
-    visualizeOptimizationHistory(window, planner);
-
-    // --- 4. Main Loop (Static Display) ---
-    
-    // The main loop keeps the window open until the user closes it.
-    while (window.isOpen()) {
-        // Event handling (SFML 3.x returns std::optional<sf::Event>)
-        while (const auto event = window.pollEvent()) {
-            if (event->is<sf::Event::Closed>()) {
-                window.close();
-            }
-        }
-    }
+    // Show NGD results second. This window will open after the first is closed.
+    showPlannerWindow(planner_ngd, "NGD Motion Planner Results");
 
     return 0;
 }

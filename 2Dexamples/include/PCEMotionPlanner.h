@@ -5,7 +5,7 @@
 #include <iostream>
 #include <algorithm>
 #include <vector>
-#include <yaml-cpp/yaml.h> // Include the YAML-CPP header
+#include <yaml-cpp/yaml.h> 
 
 /**
  * @brief Proximal Cross-Entropy Method (PCEM) for Trajectory Optimization.
@@ -375,6 +375,7 @@ private:
         return x;
     }
 
+public:
     float computeCollisionCost(const Trajectory& traj, const std::vector<Obstacle>& obstacles) const {
         float total_cost = 0.0f;
         
