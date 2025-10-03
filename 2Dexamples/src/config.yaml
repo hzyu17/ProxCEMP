@@ -4,11 +4,11 @@ motion_planning:
   initial_step_size: 8.0
 
 pce_planner:
-  num_samples: 200     # Number of Monte Carlo samples
-  num_iterations: 100   # Number of optimization iterations
-  temperature: 0.5     # Gamma parameter
-  convergence_threshold: 0.005 # Cost value to stop optimization at
+  num_samples: 500     # Number of Monte Carlo samples
+  num_iterations: 1000   # Number of optimization iterations
+  temperature: 1.0     # Gamma parameter
+  convergence_threshold: 0.001 # Cost value to stop optimization at
   
   cost:
-    epsilon_sdf: 15.0  # Hinge loss cut-off distance
+    epsilon_sdf: 5.0  # Hinge loss cut-off distance
     sigma_obs: 1.5     # Weight for obstacle violations
