@@ -1,11 +1,12 @@
 #include <SFML/Graphics.hpp>
 #include <iostream>
 #include <random>
+#include <yaml-cpp/yaml.h> // New include for configuration parsing
 
 // Include necessary headers from your project structure
 #include "../include/ObstacleMap.h" // For MAP_WIDTH, MAP_HEIGHT, Obstacle, generateObstacles, NUM_OBSTACLES, OBSTACLE_RADIUS
 #include "../include/Trajectory.h" // For PathNode, Trajectory, generateInterpolatedTrajectoryLinear
-#include "../include/MotionPlanner.h" // For MotionPlanner base class, sampleSmoothnessNoise, BasicPlanner
+#include "../include/PCEMotionPlanner.h" // For MotionPlanner base class, sampleSmoothnessNoise, BasicPlanner
 
 // --- Drawing Utilities (Copied and adapted from main.cpp) ---
 
@@ -107,24 +108,58 @@ void visualizeNoise(const MotionPlanner& planner, const Trajectory& base_traject
 int main() {
     std::cout << "--- Trajectory Noise Visualization ---\n";
 
-    // --- 1. Setup Parameters ---
-    int numNodes = 300;
-    float totalTime = 40.0f;
+    // --- 1. Setup Parameters (Defaults) ---
+    int numNodes = 100;
+    float totalTime = 10.0f; 
     float nodeRadius = 5.0f;
-    const size_t numSamples = 100; // Number of noisy trajectories to generate
+    const size_t numSamples = 100; // Fixed visualization parameter
 
+    YAML::Node config;
+
+    // --- 1b. Read Config File ---
+    try {
+        config = YAML::LoadFile("../src/config.yaml");
+
+        if (config["motion_planning"]) {
+            const YAML::Node& mp_config = config["motion_planning"];
+            if (mp_config["initial_nodes"]) {
+                numNodes = mp_config["initial_nodes"].as<int>();
+            }
+            // NOTE: Interpreting 'initial_step_size' as 'totalTime' (trajectory duration)
+            if (mp_config["initial_step_size"]) {
+                totalTime = mp_config["initial_step_size"].as<float>();
+            }
+            if (mp_config["node_collision_radius"]) {
+                nodeRadius = mp_config["node_collision_radius"].as<float>();
+            }
+        } else {
+            std::cerr << "Warning: 'motion_planning' section not found in config.yaml. Using defaults.\n";
+        }
+    } catch (const YAML::BadFile& e) {
+        std::cerr << "Warning: Could not open config.yaml. Using default values.\n";
+    } catch (const YAML::Exception& e) {
+        std::cerr << "Error parsing config.yaml: " << e.what() << ". Using default values.\n";
+    }
+
+    // Log the read values
+    std::cout << "Config loaded:\n";
+    std::cout << "  Initial Nodes: " << numNodes << "\n";
+    std::cout << "  Total Time (Initial Step Size): " << totalTime << "\n";
+    std::cout << "  Node Radius: " << nodeRadius << "\n";
+    
+    // --- 1c. Define Start/Goal ---
     PathNode start = {50.0f, 550.0f, nodeRadius};
     PathNode goal = {750.0f, 50.0f, nodeRadius};
     
-    // --- CHANGE 1: Generate actual obstacles ---
+    // Generate actual obstacles
     std::vector<Obstacle> obstacles = generateObstacles(NUM_OBSTACLES, OBSTACLE_RADIUS, MAP_WIDTH, MAP_HEIGHT); 
 
     // --- 2. Initialize Motion Planner (used only for noise sampling and R matrix) ---
-    // Pass the generated obstacles to the planner
-    BasicPlanner dummy_planner(obstacles);
-    dummy_planner.initialize(start, goal, numNodes, totalTime, InterpolationMethod::LINEAR);
+    // Pass the generated obstacles to the planner and use configured parameters
+    ProximalCrossEntropyMotionPlanner planner(obstacles, config);
+    planner.initialize(start, goal, numNodes, totalTime, InterpolationMethod::LINEAR);
     
-    const Trajectory& base_trajectory = dummy_planner.getCurrentTrajectory();
+    const Trajectory& base_trajectory = planner.getCurrentTrajectory();
     const size_t N = base_trajectory.nodes.size();
     
     // --- 3. Generate Noise Samples (epsilon) ---
@@ -135,9 +170,8 @@ int main() {
     std::cout << "Generating " << numSamples << " smoothness noise samples for " << N << " nodes...\n";
 
     for (size_t m = 0; m < numSamples; ++m) {
-        // sampleSmoothnessNoise is a protected method of MotionPlanner, accessible via BasicPlanner instance
-        epsilon_x_samples[m] = dummy_planner.sampleSmoothnessNoise(N, rng);
-        epsilon_y_samples[m] = dummy_planner.sampleSmoothnessNoise(N, rng);
+        epsilon_x_samples[m] = planner.sampleSmoothnessNoise(N, rng);
+        epsilon_y_samples[m] = planner.sampleSmoothnessNoise(N, rng);
     }
 
     // --- 4. Create Noisy Sample Trajectories (Y + epsilon) ---
@@ -163,7 +197,7 @@ int main() {
     std::cout << "Generated " << noisy_samples.size() << " perturbed trajectories.\n";
 
     // --- 5. Visualize ---
-    visualizeNoise(dummy_planner, base_trajectory, noisy_samples);
+    visualizeNoise(planner, base_trajectory, noisy_samples);
 
     return 0;
 }

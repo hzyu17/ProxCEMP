@@ -24,7 +24,6 @@ public:
         if (config["pce_planner"]) {
             const YAML::Node& planner_config = config["pce_planner"];
             
-            // --- Key Change: Check for key existence before casting ---
             if (planner_config["num_samples"]) {
                 num_samples_ = planner_config["num_samples"].as<size_t>();
             } else {
@@ -93,10 +92,10 @@ public:
      */
     bool optimize() override {
         std::cout << "\n--- Starting PCEM Optimization ---\n";
-        std::cout << "Update Rule: Y_{k+1} = Σ w_m S(Y_k + ε_m), where ε_m ~ N(0, R^{-1})\n\n";
+        std::cout << "Update Rule: Y_{k+1} = Σ w_m (Y_k + ε_m), where w ∝ exp(-γ(S(Ỹ) - Ỹ^T*R*Y_k))\n\n";
         
         const size_t N = current_trajectory_.nodes.size();
-        const size_t M = num_samples_;  // Number of Monte Carlo samples (e.g., 100-500)
+        const size_t M = num_samples_;
         
         // Store initial trajectory Y_0 (Iteration 0)
         storeTrajectory();
@@ -123,7 +122,6 @@ public:
             }
             
             // --- Step 2: Extract Y_k (current trajectory) as vectors ---
-            // Y_k is the current trajectory at iteration k
             std::vector<float> Y_k_x(N);
             std::vector<float> Y_k_y(N);
             for (size_t i = 0; i < N; ++i) {
@@ -131,38 +129,47 @@ public:
                 Y_k_y[i] = current_trajectory_.nodes[i].y;
             }
             
-            // --- Step 3: Compute R^{-1} * Y_k for bias correction ---
-            std::vector<float> R_inv_Y_k_x = solveRInverse(Y_k_x);
-            std::vector<float> R_inv_Y_k_y = solveRInverse(Y_k_y);
+            // --- Step 3: Compute R * Y_k for bias correction term ---
+            std::vector<float> R_Y_k_x = applyRMatrix(Y_k_x);
+            std::vector<float> R_Y_k_y = applyRMatrix(Y_k_y);
             
             // --- Step 4: Evaluate costs and compute weights ---
             std::vector<float> weights(M);
             std::vector<Trajectory> sampled_trajectories(M);
             float max_exponent = -std::numeric_limits<float>::infinity();
             
+            // Diagnostics
+            std::vector<float> collision_costs(M);
+            std::vector<float> bias_terms(M);
+            
             for (size_t m = 0; m < M; ++m) {
-                // Create sampled trajectory: (Y_k + ε_m)
-                // This represents a candidate trajectory perturbed from current Y_k
+                // Create sampled trajectory: Ỹ = Y_k + ε_m
                 sampled_trajectories[m] = current_trajectory_;
                 for (size_t i = 0; i < N; ++i) {
                     sampled_trajectories[m].nodes[i].x = Y_k_x[i] + epsilon_x_samples[m][i];
                     sampled_trajectories[m].nodes[i].y = Y_k_y[i] + epsilon_y_samples[m][i];
                 }
                 
-                // Compute collision cost S(Y_k + epsilon_m)
+                // Compute collision cost S(Ỹ)
                 float collision_cost = computeCollisionCost(sampled_trajectories[m], obstacles_);
                 
-                // Compute bias correction: epsilon_m^T * R^{-1} * Y_k
+                // Compute bias term: Ỹ^T * R * Y_k = (Y_k + ε)^T * R * Y_k
+                // Since Y_k^T * R * Y_k is constant across samples, we only need ε^T * R * Y_k
                 float bias_x = 0.0f;
                 float bias_y = 0.0f;
                 for (size_t i = 0; i < N; ++i) {
-                    bias_x += epsilon_x_samples[m][i] * R_inv_Y_k_x[i];
-                    bias_y += epsilon_y_samples[m][i] * R_inv_Y_k_y[i];
+                    bias_x += epsilon_x_samples[m][i] * R_Y_k_x[i];
+                    bias_y += epsilon_y_samples[m][i] * R_Y_k_y[i];
                 }
-                float bias_correction = bias_x + bias_y;
+                float bias_term = bias_x + bias_y;
                 
-                // Compute exponent: -gamma * (S(Y_k + epsilon_m) - epsilon_m^T R^{-1} Y_k)
-                float exponent = -gamma_ * (collision_cost - bias_correction);
+                // Store for diagnostics
+                collision_costs[m] = collision_cost;
+                bias_terms[m] = bias_term;
+                
+                // Compute exponent: -γ * (S(Ỹ) - Ỹ^T * R * Y_k)
+                // Equivalently: -γ * (S(Ỹ) - ε^T * R * Y_k) since constant cancels in normalization
+                float exponent = -gamma_ * (collision_cost + bias_term);
                 
                 // Track maximum for numerical stability
                 if (exponent > max_exponent) {
@@ -170,25 +177,25 @@ public:
                 }                
                 weights[m] = exponent;  // Store exponent temporarily
             }
-
-            // ============ DEBUG ============
-            std::vector<float> log_weights_raw(M);
-            for (size_t m = 0; m < M; ++m) {
-                log_weights_raw[m] = weights[m]; // Save the raw log-weights before exp
-            }
+            
+            // Print diagnostic statistics
+            auto minmax_collision = std::minmax_element(collision_costs.begin(), collision_costs.end());
+            auto minmax_bias = std::minmax_element(bias_terms.begin(), bias_terms.end());
+            std::cout << "Collision cost range: [" << *minmax_collision.first << ", " 
+                      << *minmax_collision.second << "]\n";
+            std::cout << "Bias term range: [" << *minmax_bias.first << ", " 
+                      << *minmax_bias.second << "]\n";
 
             // Print statistics BEFORE exp
             float min_log_weight = *std::min_element(weights.begin(), weights.end());
             float max_log_weight = *std::max_element(weights.begin(), weights.end());
             std::cout << "Log-weight range: [" << min_log_weight << ", " << max_log_weight 
                     << "], span = " << (max_log_weight - min_log_weight) << "\n";
-
-            // ============ DEBUG ============
             
             // --- Step 5: Normalize weights (subtract max for numerical stability) ---
             float weight_sum = 0.0f;
             for (size_t m = 0; m < M; ++m) {
-                weights[m] = std::exp((weights[m] - max_exponent) / temperature_);
+                weights[m] = std::exp(weights[m] - max_exponent);
                 weight_sum += weights[m];
             }
             
@@ -198,16 +205,17 @@ public:
             }
 
             // After normalization, check weight distribution
-            std::sort(weights.begin(), weights.end(), std::greater<float>());
+            std::vector<float> sorted_weights = weights;
+            std::sort(sorted_weights.begin(), sorted_weights.end(), std::greater<float>());
             std::cout << "Top 5 weights: ";
             for (size_t i = 0; i < std::min(5ul, M); ++i) {
-                std::cout << weights[i] << " ";
+                std::cout << sorted_weights[i] << " ";
             }
             std::cout << "\nBottom 5 weights: ";
             for (size_t i = M-5; i < M; ++i) {
-                std::cout << weights[i] << " ";
+                std::cout << sorted_weights[i] << " ";
             }
-            std::cout << "\nMax weight: " << weights[0] << "\n";
+            std::cout << "\nMax weight: " << sorted_weights[0] << "\n";
             
             // --- Step 6: Compute Y_{k+1} via weighted mean update ---
             // Y_{k+1} = Σ w_m (Y_k + ε_m)
@@ -228,7 +236,6 @@ public:
             }
             
             // --- Step 8: Store Y_{k+1} and check convergence ---
-            // current_trajectory_ now contains Y_{k+1}, which becomes Y_k in the next iteration
             storeTrajectory();
             float new_cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
             
@@ -272,107 +279,51 @@ private:
     float gamma_ = 1.0;
     float convergence_threshold_ = 0.01f;
 
-    // Cost function parameters (now initialized from config)
+    // Cost function parameters
     float epsilon_sdf_ = 20.0f;
     float sigma_obs_ = 1.0f;
     
     // Internal state for optimization
-    std::mt19937 random_engine_; // Random number generator engine
-
+    std::mt19937 random_engine_;
 
     /**
-     * @brief Solves R^{-1} * y for a given vector y using Cholesky factorization.
-     * Since R = L * L^T, we solve: L * L^T * x = y
-     * First solve L * z = y (forward substitution), then solve L^T * x = z (back substitution)
+     * @brief Applies the R matrix to a vector: computes R * epsilon
+     * R is a pentadiagonal smoothness matrix
      */
-    std::vector<float> solveRInverse(const std::vector<float>& y) const {
-        const size_t N = y.size();
-        if (N < 3) return y;
+    std::vector<float> applyRMatrix(const std::vector<float>& epsilon) const {
+        const size_t N = epsilon.size();
+        if (N < 3) return epsilon;
         
-        // Extract free nodes (indices 1 to N-2)
-        size_t N_free = N - 2;
-        std::vector<float> y_free(N_free);
-        for (size_t i = 0; i < N_free; ++i) {
-            y_free[i] = y[i + 1];
-        }
-        
-        // Get R matrix diagonals and perform Cholesky factorization
+        // Get R matrix diagonals
         RMatrixDiagonals R_bands = getSmoothnessMatrixRDiagonals(N);
         
-        // Extract submatrix for free nodes
-        std::vector<float> R_main(N_free);
-        std::vector<float> R_diag1(N_free - 1);
-        std::vector<float> R_diag2(N_free - 2);
+        // R * epsilon for pentadiagonal matrix
+        std::vector<float> result(N, 0.0f);
         
-        for (size_t i = 0; i < N_free; ++i) {
-            R_main[i] = R_bands.main_diag[i + 1];
-        }
-        for (size_t i = 0; i < N_free - 1; ++i) {
-            R_diag1[i] = R_bands.diag1[i + 1];
-        }
-        for (size_t i = 0; i < N_free - 2; ++i) {
-            R_diag2[i] = R_bands.diag2[i + 1];
-        }
-        
-        // Cholesky factorization: R = L * L^T
-        std::vector<float> L0(N_free);
-        std::vector<float> L1(N_free - 1);
-        std::vector<float> L2(N_free - 2);
-        
-        // Compute L (same as in sampleSmoothnessNoise)
-        L0[0] = std::sqrt(R_main[0]);
-        if (N_free > 1) {
-            L1[0] = R_diag1[0] / L0[0];
-        }
-        if (N_free > 2) {
-            L2[0] = R_diag2[0] / L0[0];
-            L0[1] = std::sqrt(R_main[1] - L1[0] * L1[0]);
-            L1[1] = (R_diag1[1] - L2[0] * L1[0]) / L0[1];
-        }
-        if (N_free > 3) {
-            L2[1] = R_diag2[1] / L0[1];
-        }
-        
-        for (size_t i = 2; i < N_free - 2; ++i) {
-            L0[i] = std::sqrt(R_main[i] - L1[i-1] * L1[i-1] - L2[i-2] * L2[i-2]);
-            L1[i] = (R_diag1[i] - L2[i-1] * L1[i-1]) / L0[i];
-            L2[i] = R_diag2[i] / L0[i];
-        }
-        
-        if (N_free > 2) {
-            L0[N_free-2] = std::sqrt(R_main[N_free-2] - L1[N_free-3] * L1[N_free-3] - L2[N_free-4] * L2[N_free-4]);
-            if (N_free > 3) {
-                L1[N_free-2] = (R_diag1[N_free-2] - L2[N_free-3] * L1[N_free-3]) / L0[N_free-2];
+        for (size_t i = 0; i < N; ++i) {
+            // Main diagonal
+            result[i] += R_bands.main_diag[i] * epsilon[i];
+            
+            // First off-diagonal (upper and lower due to symmetry)
+            if (i > 0) {
+                result[i] += R_bands.diag1[i-1] * epsilon[i-1];
             }
-            L0[N_free-1] = std::sqrt(R_main[N_free-1] - L1[N_free-2] * L1[N_free-2] - L2[N_free-3] * L2[N_free-3]);
+            if (i < N - 1) {
+                result[i] += R_bands.diag1[i] * epsilon[i+1];
+            }
+            
+            // Second off-diagonal (upper and lower due to symmetry)
+            if (i > 1) {
+                result[i] += R_bands.diag2[i-2] * epsilon[i-2];
+            }
+            if (i < N - 2) {
+                result[i] += R_bands.diag2[i] * epsilon[i+2];
+            }
         }
         
-        // Step 1: Solve L * z = y_free (forward substitution)
-        std::vector<float> z(N_free);
-        for (size_t i = 0; i < N_free; ++i) {
-            float sum = y_free[i];
-            if (i >= 1) sum -= L1[i-1] * z[i-1];
-            if (i >= 2) sum -= L2[i-2] * z[i-2];
-            z[i] = sum / L0[i];
-        }
-        
-        // Step 2: Solve L^T * x_free = z (backward substitution)
-        std::vector<float> x_free(N_free);
-        for (int i = N_free - 1; i >= 0; --i) {
-            float sum = z[i];
-            if (i + 1 < static_cast<int>(N_free)) sum -= L1[i] * x_free[i+1];
-            if (i + 2 < static_cast<int>(N_free)) sum -= L2[i] * x_free[i+2];
-            x_free[i] = sum / L0[i];
-        }
-        
-        // Construct full vector with zeros at boundaries
-        std::vector<float> x(N, 0.0f);
-        for (size_t i = 0; i < N_free; ++i) {
-            x[i + 1] = x_free[i];
-        }
-        
-        return x;
+        return result;
     }
+
 
 public:
     float computeCollisionCost(const Trajectory& traj, const std::vector<Obstacle>& obstacles) const {
@@ -380,30 +331,25 @@ public:
         
         // For each node in trajectory
         for (const auto& node : traj.nodes) {
-            // F(X) = X (forward kinematics is identity in simplest case)
             float x = node.x;
             float y = node.y;
             
             // Compute hinge loss for each obstacle
             for (const auto& obs : obstacles) {
-                // S(F(X)): Signed distance to obstacle
-                // Positive = outside obstacle, Negative = inside obstacle
+                // Signed distance to obstacle
                 float dx = x - obs.x;
                 float dy = y - obs.y;
                 float dist_to_center = std::sqrt(dx*dx + dy*dy);
                 float signed_distance = dist_to_center - obs.radius - node.radius;
                 
-                // h_tilde(d): Hinge loss function with cut-off epsilon_sdf
-                // h(d) = max(0, epsilon_sdf - d)
-                // This penalizes when d < epsilon_sdf (too close or in collision)
+                // Hinge loss function with cut-off epsilon_sdf
                 float hinge_loss = std::max(0.0f, epsilon_sdf_ - signed_distance);
                 
-                // ||h_tilde||²_Σ: Weighted squared hinge loss
+                // Weighted squared hinge loss
                 total_cost += sigma_obs_ * hinge_loss * hinge_loss;
             }
         }
         
         return total_cost;
     }
-
 };
