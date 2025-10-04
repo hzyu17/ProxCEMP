@@ -99,6 +99,9 @@ public:
 
         float alpha = 0.99f;
         float alpha_temp = 0.99f;
+
+        float best_cost = cost;
+        size_t best_iteration = 0;
         
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
 
@@ -243,6 +246,12 @@ public:
             // --- Step 8: Store Y_{k+1} and check convergence ---
             storeTrajectory();
             float new_cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
+
+            // Track best trajectory
+            if (new_cost < best_cost) {
+                best_cost = new_cost;
+                best_iteration = iteration;
+            }
             
             // Compute effective sample size (ESS) for diagnostics
             float ess = 0.0f;
@@ -261,6 +270,21 @@ public:
             }
             
             cost = new_cost;
+        }
+
+        // Restore the best trajectory found during optimization
+        if (best_iteration < trajectory_history_.size()) {
+            current_trajectory_ = trajectory_history_[best_iteration];
+
+            std::cout << "\n*** Restoring best trajectory from iteration " << best_iteration 
+                      << " with cost " << best_cost << " ***\n";
+
+            // Remove all trajectories after the best iteration
+            trajectory_history_.erase(
+                trajectory_history_.begin() + best_iteration + 1,
+                trajectory_history_.end()
+            );
+
         }
         
         std::cout << "PCEM finished. Final Cost: " << computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_) << "\n";

@@ -94,7 +94,11 @@ public:
         storeTrajectory();
         float cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
         
+        float alpha = 0.99f;
+
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
+
+            learning_rate_ = learning_rate_ * alpha;
             
             std::cout << "------- Iteration " << iteration << " : Cost = " << cost << "------ \n";
 

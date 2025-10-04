@@ -7,7 +7,7 @@ motion_planning:
 pce_planner:
   num_samples: 3000
   num_iterations: 100
-  eta:  10
+  eta:  5
   temperature: 0.99
   convergence_threshold: 0.01
   
@@ -18,7 +18,7 @@ pce_planner:
 ngd_planner:
   num_samples: 3000
   num_iterations: 100
-  learning_rate:  0.99
+  learning_rate:  1.01
   convergence_threshold: 0.01
   
   cost:
