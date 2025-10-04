@@ -112,13 +112,13 @@ int main() {
     int numNodes = 100;
     float totalTime = 10.0f; 
     float nodeRadius = 5.0f;
-    const size_t numSamples = 100; // Fixed visualization parameter
+    const size_t numSamples = 500; // Fixed visualization parameter
 
     YAML::Node config;
 
     // --- 1b. Read Config File ---
     try {
-        config = YAML::LoadFile("../src/config.yaml");
+        config = YAML::LoadFile("../configs/config.yaml");
 
         if (config["motion_planning"]) {
             const YAML::Node& mp_config = config["motion_planning"];
@@ -155,9 +155,10 @@ int main() {
     std::vector<Obstacle> obstacles = generateObstacles(NUM_OBSTACLES, OBSTACLE_RADIUS, MAP_WIDTH, MAP_HEIGHT); 
 
     // --- 2. Initialize Motion Planner (used only for noise sampling and R matrix) ---
+    float clearance_dist = 100.0;
     // Pass the generated obstacles to the planner and use configured parameters
     ProximalCrossEntropyMotionPlanner planner(obstacles, config);
-    planner.initialize(start, goal, numNodes, totalTime, InterpolationMethod::LINEAR);
+    planner.initialize(start, goal, numNodes, totalTime, InterpolationMethod::LINEAR, obstacles, clearance_dist);
     
     const Trajectory& base_trajectory = planner.getCurrentTrajectory();
     const size_t N = base_trajectory.nodes.size();

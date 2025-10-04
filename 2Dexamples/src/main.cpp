@@ -2,7 +2,7 @@
 #include <iostream>
 #include <variant> 
 #include <random> 
-
+#include <filesystem>
 
 #include "../include/ObstacleMap.h" // Includes Obstacle and Map constants
 #include "../include/Trajectory.h"
@@ -128,7 +128,19 @@ int main() {
 
     // Read values from config.yaml
     try {
-        config = YAML::LoadFile("../src/config.yaml");
+
+        std::filesystem::path source_path(__FILE__);
+        
+        // Find the directory containing the source file
+        std::filesystem::path source_dir = source_path.parent_path();
+
+        // Construct the path to the config file relative to the source directory
+        std::filesystem::path relative_config_path = source_dir / "../configs/config.yaml";
+
+        // Resolve the path to get the clean, absolute path
+        std::filesystem::path config_file_path = std::filesystem::canonical(relative_config_path);
+
+        config = YAML::LoadFile(config_file_path.string());
 
         if (config["motion_planner"]) {
             const YAML::Node& plannerConfig = config["motion_planner"];
@@ -155,11 +167,13 @@ int main() {
     PathNode start = PathNode{50.0f, 550.0f, nodeCollisionRadius}; // Bottom left
     PathNode goal = PathNode{750.0f, 50.0f, nodeCollisionRadius};  // Top right
 
-    
+    // Clearance distance to remove obstacles near start and goal
+    float clearance_dist = 100.0;
+
     // --- 2. Motion Planning - PCEM ---
     std::cout << "\n--- Starting PCEM Planner ---\n";
     ProximalCrossEntropyMotionPlanner planner_pce(obstacles, config);
-    planner_pce.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR);
+    planner_pce.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR, obstacles, clearance_dist);
     bool success_pce = planner_pce.optimize();
     // FIX: Explicitly call the base class version to avoid name hiding issues.
     std::cout << "PCEM Optimization finished. Cost: " << planner_pce.MotionPlanner::computeCollisionCost(obstacles) + planner_pce.computeSmoothnessCost() << "\n";
@@ -168,7 +182,7 @@ int main() {
     std::cout << "\n--- Starting NGD Planner ---\n";
     NGDMotionPlanner planner_ngd(obstacles, config);
     // Initialize NGD with the same initial trajectory
-    planner_ngd.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR);
+    planner_ngd.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR, obstacles, clearance_dist);
     bool success_ngd = planner_ngd.optimize();
     // FIX: Explicitly call the base class version to avoid name hiding issues.
     std::cout << "NGD Optimization finished. Cost: " << planner_ngd.MotionPlanner::computeCollisionCost(obstacles) + planner_ngd.computeSmoothnessCost() << "\n";

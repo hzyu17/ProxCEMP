@@ -111,7 +111,7 @@ int main() {
 
     // Read values from config.yaml
     try {
-        config = YAML::LoadFile("../src/config.yaml");
+        config = YAML::LoadFile("../configs/config.yaml");
 
         if (config["motion_planning"]) {
             const YAML::Node& plannerConfig = config["motion_planning"];
@@ -145,10 +145,10 @@ int main() {
     PathNode goal = PathNode{750.0f, 50.0f, nodeCollisionRadius};  // Top right
 
     // --- 2. Motion Planning ---
-    
+    float clearance_dist = 100.0;
     // 2a. Initialize the PCEM planner with the obstacle map
     ProximalCrossEntropyMotionPlanner planner(obstacles, config);
-    planner.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR);
+    planner.initialize(start, goal, numInitialNodes, initialTotalTime, InterpolationMethod::LINEAR, obstacles, clearance_dist);
 
     // --- 3. Initial State and Collision Check Visualization ---
     sf::RenderWindow window(sf::VideoMode({MAP_WIDTH, MAP_HEIGHT}), "Initial Trajectory and Collision Spheres", sf::Style::Titlebar | sf::Style::Close);

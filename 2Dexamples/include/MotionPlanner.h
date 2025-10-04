@@ -43,18 +43,25 @@ public:
      * @param num_steps The number of nodes in the initial trajectory.
      * @param total_time The time duration of the trajectory.
      * @param method The interpolation method to use (LINEAR or BEZIER).
+     * @param obstacles Reference to the obstacles vector (obstacles near start/goal will be removed).
+     * @param clearance_radius The radius around start and goal within which obstacles are removed.
      */
     void initialize(const PathNode& start, 
                     const PathNode& goal, 
                     size_t num_steps, 
                     float total_time, 
-                    InterpolationMethod method){
+                    InterpolationMethod method,
+                    std::vector<Obstacle>& obstacles,
+                    float clearance_radius = 1.0f){
         
         start_node_ = start;
         goal_node_ = goal;
 
         // Clear history on initialization
         trajectory_history_.clear();
+
+        // Remove obstacles near start and goal positions
+        removeObstaclesNearPoints(obstacles, start, goal, clearance_radius);
 
         switch (method) {
             case InterpolationMethod::LINEAR:
@@ -355,6 +362,51 @@ protected:
         // Default implementation for basic example
         return false;
     }
+
+private:
+    /**
+     * @brief Removes obstacles that are within clearance_radius of the start or goal positions.
+     * @param obstacles Reference to the obstacles vector (modified in-place).
+     * @param start The starting path node.
+     * @param goal The goal path node.
+     * @param clearance_radius The radius within which obstacles are removed.
+     */
+    void removeObstaclesNearPoints(std::vector<Obstacle>& obstacles,
+                                   const PathNode& start,
+                                   const PathNode& goal,
+                                   float clearance_radius) {
+        size_t initial_count = obstacles.size();
+        
+        // Use erase-remove idiom to efficiently remove obstacles
+        obstacles.erase(
+            std::remove_if(obstacles.begin(), obstacles.end(),
+                [&](const Obstacle& obs) {
+                    // Calculate distance from obstacle center to start position
+                    float dist_to_start = std::sqrt(
+                        std::pow(obs.x - start.x, 2) + 
+                        std::pow(obs.y - start.y, 2)
+                    );
+                    
+                    // Calculate distance from obstacle center to goal position
+                    float dist_to_goal = std::sqrt(
+                        std::pow(obs.x - goal.x, 2) + 
+                        std::pow(obs.y - goal.y, 2)
+                    );
+                    
+                    // Remove if obstacle is within clearance radius of either start or goal
+                    return (dist_to_start <= clearance_radius) || 
+                           (dist_to_goal <= clearance_radius);
+                }),
+            obstacles.end()
+        );
+        
+        size_t removed_count = initial_count - obstacles.size();
+        if (removed_count > 0) {
+            std::cout << "Removed " << removed_count 
+                      << " obstacle(s) near start/goal positions.\n";
+        }
+    }
+    
 };
 
 /**

@@ -1,0 +1,26 @@
+# config.yaml
+motion_planning:
+  initial_nodes: 500
+  initial_step_size: 80.0
+  node_collision_radius: 15.0 
+
+pce_planner:
+  num_samples: 3000
+  num_iterations: 50
+  eta:  2.0
+  temperature: 1
+  convergence_threshold: 0.1
+  
+  cost:
+    epsilon_sdf: 1.0
+    sigma_obs: 0.01
+
+ngd_planner:
+  num_samples: 3000
+  num_iterations: 50
+  learning_rate:  0.99
+  convergence_threshold: 0.1
+  
+  cost:
+    epsilon_sdf: 1.0
+    sigma_obs: 0.01
