@@ -122,12 +122,12 @@ int main() {
 
         if (config["motion_planning"]) {
             const YAML::Node& mp_config = config["motion_planning"];
-            if (mp_config["initial_nodes"]) {
-                numNodes = mp_config["initial_nodes"].as<int>();
+            if (mp_config["num_discretization"]) {
+                numNodes = mp_config["num_discretization"].as<int>();
             }
-            // NOTE: Interpreting 'initial_step_size' as 'totalTime' (trajectory duration)
-            if (mp_config["initial_step_size"]) {
-                totalTime = mp_config["initial_step_size"].as<float>();
+            // NOTE: Interpreting 'total_time' as 'totalTime' (trajectory duration)
+            if (mp_config["total_time"]) {
+                totalTime = mp_config["total_time"].as<float>();
             }
             if (mp_config["node_collision_radius"]) {
                 nodeRadius = mp_config["node_collision_radius"].as<float>();

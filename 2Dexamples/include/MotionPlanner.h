@@ -76,6 +76,9 @@ public:
                 break;
         }
 
+        // Pre-compute and cache the Cholesky factorization for smoothness sampling
+        precomputeCholeskyFactorization(num_steps, total_time);
+
         std::cout << "Planner initialized with " << current_trajectory_.nodes.size() << " nodes.\n";
     }
 
@@ -219,79 +222,21 @@ public:
         // The number of FREE nodes (excluding fixed start and goal)
         size_t N_free = N - 2;
         
-        // --- 1. Get R matrix for FREE nodes only (indices 1 to N-2) ---
-        // We need the smoothness matrix for the unconstrained nodes
-        RMatrixDiagonals R_bands = getSmoothnessMatrixRDiagonals(N);
-        
-        // Extract the submatrix for free nodes (skip first and last rows/columns)
-        std::vector<float> R_main(N_free);
-        std::vector<float> R_diag1(N_free - 1);
-        std::vector<float> R_diag2(N_free - 2);
-        
-        // Copy the free node portion of R
-        for (size_t i = 0; i < N_free; ++i) {
-            R_main[i] = R_bands.main_diag[i + 1];  // Skip first fixed node
-        }
-        for (size_t i = 0; i < N_free - 1; ++i) {
-            R_diag1[i] = R_bands.diag1[i + 1];  // Skip first fixed node
-        }
-        for (size_t i = 0; i < N_free - 2; ++i) {
-            R_diag2[i] = R_bands.diag2[i + 1];  // Skip first fixed node
+        // Verify that we have pre-computed Cholesky factors
+        if (L0_.empty() || L0_.size() != N_free) {
+            std::cerr << "Error: Cholesky factorization not computed. Call initialize() first.\n";
+            return std::vector<float>(N, 0.0f);
         }
         
-        // --- 2. Cholesky Factorization of R_free (R_free = L * L^T) ---
-        std::vector<float> L0(N_free);
-        std::vector<float> L1(N_free - 1);
-        std::vector<float> L2(N_free - 2);
-        
-        // Initial boundary conditions
-        L0[0] = std::sqrt(R_main[0]);
-        if (N_free > 1) {
-            L1[0] = R_diag1[0] / L0[0];
-        }
-        if (N_free > 2) {
-            L2[0] = R_diag2[0] / L0[0];
-        }
-        
-        // General case: i = 1
-        if (N_free > 1) {
-            L0[1] = std::sqrt(R_main[1] - L1[0] * L1[0]);
-            if (N_free > 2) {
-                L1[1] = (R_diag1[1] - L2[0] * L1[0]) / L0[1];
-            }
-            if (N_free > 3) {
-                L2[1] = R_diag2[1] / L0[1];
-            }
-        }
-        
-        // General case: i = 2 to N_free-3
-        for (size_t i = 2; i < N_free - 2; ++i) {
-            L0[i] = std::sqrt(R_main[i] - L1[i - 1] * L1[i - 1] - L2[i - 2] * L2[i - 2]);
-            L1[i] = (R_diag1[i] - L2[i - 1] * L1[i - 1]) / L0[i];
-            L2[i] = R_diag2[i] / L0[i];
-        }
-        
-        // Boundary case: i = N_free-2
-        if (N_free > 2) {
-            L0[N_free - 2] = std::sqrt(R_main[N_free - 2] - L1[N_free - 3] * L1[N_free - 3] - L2[N_free - 4] * L2[N_free - 4]);
-            if (N_free > 3) {
-                L1[N_free - 2] = (R_diag1[N_free - 2] - L2[N_free - 3] * L1[N_free - 3]) / L0[N_free - 2];
-            }
-        }
-        
-        // Boundary case: i = N_free-1
-        if (N_free > 2) {
-            L0[N_free - 1] = std::sqrt(R_main[N_free - 1] - L1[N_free - 2] * L1[N_free - 2] - L2[N_free - 3] * L2[N_free - 3]);
-        }
-        
-        // --- 3. Generate White Noise Z for free nodes only ---
+        // --- 1. Generate White Noise Z for free nodes only ---
         std::vector<float> Z(N_free);
         std::normal_distribution<float> normal_dist(0.0f, 1.0f);
         for (size_t i = 0; i < N_free; ++i) {
             Z[i] = normal_dist(rng);
         }
         
-        // --- 4. Solve L^T * S_free = Z for S_free (Back-Substitution) ---
+        // --- 2. Solve L^T * S_free = Z for S_free (Back-Substitution) ---
+        // Use pre-computed Cholesky factors L0_, L1_, L2_
         std::vector<float> S_free(N_free);
         
         for (int i = N_free - 1; i >= 0; --i) {
@@ -299,19 +244,19 @@ public:
             
             // Off-diagonal 1
             if (i + 1 < static_cast<int>(N_free)) {
-                sum -= L1[i] * S_free[i + 1];
+                sum -= L1_[i] * S_free[i + 1];
             }
             
             // Off-diagonal 2
             if (i + 2 < static_cast<int>(N_free)) {
-                sum -= L2[i] * S_free[i + 2];
+                sum -= L2_[i] * S_free[i + 2];
             }
             
             // Diagonal
-            S_free[i] = sum / L0[i];
+            S_free[i] = sum / L0_[i];
         }
         
-        // --- 5. Construct full noise vector with zeros at boundaries ---
+        // --- 3. Construct full noise vector with zeros at boundaries ---
         std::vector<float> S(N, 0.0f);
         S[0] = 0.0f;           // Fixed start node
         S[N - 1] = 0.0f;       // Fixed goal node
@@ -347,6 +292,11 @@ protected:
     Trajectory current_trajectory_;
     PathNode start_node_;
     PathNode goal_node_;
+
+    // Cached Cholesky factorization of R_free (for free nodes only)
+    std::vector<float> L0_;  // Main diagonal of L
+    std::vector<float> L1_;  // First off-diagonal of L
+    std::vector<float> L2_;  // Second off-diagonal of L
     
     std::vector<Trajectory> trajectory_history_; // Stores trajectory at each iteration
 
@@ -361,6 +311,89 @@ protected:
     virtual bool checkConvergence() const {
         // Default implementation for basic example
         return false;
+    }
+
+    /**
+     * @brief Pre-computes and caches the Cholesky factorization of the smoothness 
+     *        precision matrix R for the free nodes.
+     * @param N Total number of nodes in the trajectory.
+     * @param total_time Total time duration of the trajectory.
+     */
+    void precomputeCholeskyFactorization(size_t N, float total_time) {
+        if (N < 3) {
+            L0_.clear();
+            L1_.clear();
+            L2_.clear();
+            return;
+        }
+        
+        size_t N_free = N - 2;
+        
+        // --- 1. Get R matrix for FREE nodes only (indices 1 to N-2) ---
+        RMatrixDiagonals R_bands = getSmoothnessMatrixRDiagonals(N);
+        
+        // Extract the submatrix for free nodes (skip first and last rows/columns)
+        std::vector<float> R_main(N_free);
+        std::vector<float> R_diag1(N_free - 1);
+        std::vector<float> R_diag2(N_free - 2);
+        
+        // Copy the free node portion of R
+        for (size_t i = 0; i < N_free; ++i) {
+            R_main[i] = R_bands.main_diag[i + 1];  // Skip first fixed node
+        }
+        for (size_t i = 0; i < N_free - 1; ++i) {
+            R_diag1[i] = R_bands.diag1[i + 1];  // Skip first fixed node
+        }
+        for (size_t i = 0; i < N_free - 2; ++i) {
+            R_diag2[i] = R_bands.diag2[i + 1];  // Skip first fixed node
+        }
+        
+        // --- 2. Cholesky Factorization of R_free (R_free = L * L^T) ---
+        L0_.resize(N_free);
+        L1_.resize(N_free - 1);
+        L2_.resize(N_free - 2);
+        
+        // Initial boundary conditions
+        L0_[0] = std::sqrt(R_main[0]);
+        if (N_free > 1) {
+            L1_[0] = R_diag1[0] / L0_[0];
+        }
+        if (N_free > 2) {
+            L2_[0] = R_diag2[0] / L0_[0];
+        }
+        
+        // General case: i = 1
+        if (N_free > 1) {
+            L0_[1] = std::sqrt(R_main[1] - L1_[0] * L1_[0]);
+            if (N_free > 2) {
+                L1_[1] = (R_diag1[1] - L2_[0] * L1_[0]) / L0_[1];
+            }
+            if (N_free > 3) {
+                L2_[1] = R_diag2[1] / L0_[1];
+            }
+        }
+        
+        // General case: i = 2 to N_free-3
+        for (size_t i = 2; i < N_free - 2; ++i) {
+            L0_[i] = std::sqrt(R_main[i] - L1_[i - 1] * L1_[i - 1] - L2_[i - 2] * L2_[i - 2]);
+            L1_[i] = (R_diag1[i] - L2_[i - 1] * L1_[i - 1]) / L0_[i];
+            L2_[i] = R_diag2[i] / L0_[i];
+        }
+        
+        // Boundary case: i = N_free-2
+        if (N_free > 2) {
+            L0_[N_free - 2] = std::sqrt(R_main[N_free - 2] - L1_[N_free - 3] * L1_[N_free - 3] - L2_[N_free - 4] * L2_[N_free - 4]);
+            if (N_free > 3) {
+                L1_[N_free - 2] = (R_diag1[N_free - 2] - L2_[N_free - 3] * L1_[N_free - 3]) / L0_[N_free - 2];
+            }
+        }
+        
+        // Boundary case: i = N_free-1
+        if (N_free > 2) {
+            L0_[N_free - 1] = std::sqrt(R_main[N_free - 1] - L1_[N_free - 2] * L1_[N_free - 2] - L2_[N_free - 3] * L2_[N_free - 3]);
+        }
+        
+        std::cout << "Cholesky factorization pre-computed for " << N_free << " free nodes.\n";
     }
 
 private:
@@ -406,7 +439,7 @@ private:
                       << " obstacle(s) near start/goal positions.\n";
         }
     }
-    
+
 };
 
 /**

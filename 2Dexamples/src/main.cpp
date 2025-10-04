@@ -144,8 +144,8 @@ int main() {
 
         if (config["motion_planner"]) {
             const YAML::Node& plannerConfig = config["motion_planner"];
-            if (plannerConfig["initial_nodes"]) {
-                numInitialNodes = plannerConfig["initial_nodes"].as<int>();
+            if (plannerConfig["num_discretization"]) {
+                numInitialNodes = plannerConfig["num_discretization"].as<int>();
             }
             if (plannerConfig["initial_total_time"]) {
                 initialTotalTime = plannerConfig["initial_total_time"].as<float>();

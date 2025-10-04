@@ -115,8 +115,8 @@ int main() {
 
         if (config["motion_planning"]) {
             const YAML::Node& plannerConfig = config["motion_planning"];
-            if (plannerConfig["initial_nodes"]) {
-                numInitialNodes = plannerConfig["initial_nodes"].as<int>();
+            if (plannerConfig["num_discretization"]) {
+                numInitialNodes = plannerConfig["num_discretization"].as<int>();
             }
             if (plannerConfig["initial_total_time"]) {
                 initialTotalTime = plannerConfig["initial_total_time"].as<float>();
@@ -133,7 +133,7 @@ int main() {
     }
 
     std::cout << "Obstacle Map hyperparameters:\n"
-                  << "  initial_nodes: " << numInitialNodes << "\n"
+                  << "  num_discretization: " << numInitialNodes << "\n"
                   << "  initial_total_time: " << initialTotalTime << "\n"
                   << "  node_collision_radius: " << nodeCollisionRadius << "\n";
 

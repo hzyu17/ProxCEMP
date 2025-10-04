@@ -96,8 +96,17 @@ public:
         // Store initial trajectory Y_0 (Iteration 0)
         storeTrajectory();
         float cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
+
+        float alpha = 0.99f;
+        float alpha_temp = 0.99f;
         
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
+
+            // Update the learning rate iteratively 
+            gamma_ = gamma_ * std::pow(alpha, iteration-1);
+
+            // Adaptive temperature
+            temperature_ = temperature_ * alpha_temp;
 
             std::cout << "------- Iteration " << iteration << " : Cost = " << cost << "------ \n";
 
@@ -165,7 +174,7 @@ public:
                 
                 // Compute exponent: -γ * (S(Ỹ) - Ỹ^T * R * Y_k)
                 // Equivalently: -γ * (S(Ỹ) - ε^T * R * Y_k) since constant cancels in normalization
-                float exponent = -gamma_ * (collision_cost + bias_term);
+                float exponent = -gamma_ * (collision_cost + bias_term) / temperature_;
                 
                 // Track maximum for numerical stability
                 if (exponent > max_exponent) {
@@ -246,7 +255,7 @@ public:
                     << ", ESS = " << ess << "/" << M << "\n";
             
             // Check if cost improvement is too small
-            if (iteration > 1 && std::abs(cost - new_cost) < convergence_threshold_) {
+            if (iteration > 1 && std::abs(cost - new_cost) < convergence_threshold_ && cost - new_cost > 0) {
                 std::cout << "Cost improvement negligible. Stopping.\n";
                 break;
             }
