@@ -7,34 +7,6 @@
 
 // --- MotionPlanner Base Class Implementations ---
 
-void MotionPlanner::initialize(const PathNode& start,
-                               const PathNode& goal,
-                               size_t num_steps,
-                               float total_time,
-                               InterpolationMethod method)
-{
-    start_node_ = start;
-    goal_node_ = goal;
-
-    // Clear history on initialization
-    trajectory_history_.clear();
-
-    switch (method) {
-        case InterpolationMethod::LINEAR:
-            current_trajectory_ = generateInterpolatedTrajectoryLinear(start, goal, num_steps, total_time);
-            break;
-        case InterpolationMethod::BEZIER:
-            current_trajectory_ = generateInterpolatedTrajectoryBezier(start, goal, num_steps, total_time);
-            break;
-        default:
-            std::cerr << "Error: Unknown interpolation method selected. Using LINEAR.\n";
-            current_trajectory_ = generateInterpolatedTrajectoryLinear(start, goal, num_steps, total_time);
-            break;
-    }
-
-    std::cout << "Planner initialized with " << current_trajectory_.nodes.size() << " nodes.\n";
-}
-
 float MotionPlanner::computeCollisionCost(const std::vector<Obstacle>& obstacles) const {
     float total_cost = 0.0f;
 

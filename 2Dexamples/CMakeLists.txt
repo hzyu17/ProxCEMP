@@ -10,9 +10,9 @@ find_package(yaml-cpp REQUIRED)
 
 # Add the executable target: 'main'
 # This tells CMake to build an executable from the source file.
-add_executable(main src/main.cpp src/ObstacleMap.cpp src/Trajectory.cpp src/MotionPlanner.cpp)
-add_executable(visualize_collision_checking src/visualize_collision_checking.cpp src/ObstacleMap.cpp src/Trajectory.cpp src/MotionPlanner.cpp)
-add_executable(visualize_noisy_trj src/visualize_noisy_trj.cpp src/ObstacleMap.cpp src/Trajectory.cpp src/MotionPlanner.cpp)
+add_executable(main src/main.cpp src/MotionPlanner.cpp)
+add_executable(visualize_collision_checking src/visualize_collision_checking.cpp src/MotionPlanner.cpp)
+add_executable(visualize_noisy_trj src/visualize_noisy_trj.cpp src/MotionPlanner.cpp)
 
 target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(visualize_collision_checking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

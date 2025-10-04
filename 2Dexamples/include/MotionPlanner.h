@@ -4,6 +4,10 @@
 #include "ObstacleMap.h"
 #include <vector> 
 #include <random> 
+#include <iostream>
+#include <algorithm>
+#include <cmath>
+#include <numeric>
 
 /**
  * @brief Enumerates the available interpolation methods for initial path generation.
@@ -43,7 +47,29 @@ public:
                     const PathNode& goal, 
                     size_t num_steps, 
                     float total_time, 
-                    InterpolationMethod method);
+                    InterpolationMethod method){
+        
+        start_node_ = start;
+        goal_node_ = goal;
+
+        // Clear history on initialization
+        trajectory_history_.clear();
+
+        switch (method) {
+            case InterpolationMethod::LINEAR:
+                current_trajectory_ = generateInterpolatedTrajectoryLinear(start, goal, num_steps, total_time);
+                break;
+            case InterpolationMethod::BEZIER:
+                current_trajectory_ = generateInterpolatedTrajectoryBezier(start, goal, num_steps, total_time);
+                break;
+            default:
+                std::cerr << "Error: Unknown interpolation method selected. Using LINEAR.\n";
+                current_trajectory_ = generateInterpolatedTrajectoryLinear(start, goal, num_steps, total_time);
+                break;
+        }
+
+        std::cout << "Planner initialized with " << current_trajectory_.nodes.size() << " nodes.\n";
+    }
 
     /**
      * @brief Pure virtual function for the optimization loop (algorithm specific).
