@@ -21,7 +21,7 @@ This package provides a set of Python scripts to simulate and plan collision-fre
 ## Installation
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/hzyu17/ProxCEMP.git
+   git clone --recurse-submodules https://github.com/hzyu17/ProxCEMP.git
    cd ProxCEMP
    ```
 
@@ -56,16 +56,17 @@ ProxCEMP/
 The package operates in three steps: configure, plan, and visualize.
 
 ## 1. Configure Start and Goal Positions
+
+### GUI Controls
 Run the configuration editor to set the robot's start and goal configurations:
+```
 python config_editor_tkinter.py
-
-
-### GUI Controls:
+```
 Select START or GOAL mode using radio buttons.
 Adjust sliders for Base X, Base Y, Base Yaw, and 9 arm joints (torso, shoulder, bicep, elbow, forearm, wrist, gripper, finger_right, finger_left).
 
 
-### Output: 
+### Output
 Saves robot_configs.pkl with start/goal configurations (12 DOFs: 3 base + 9 arm).
 
 ## 2. Plan a Collision-Free Path
@@ -74,7 +75,7 @@ Run the motion planner to generate a path from start to goal:
 python motion_planner.py
 ```
 
-### Process:
+### Process
 
 Loads robot_configs.pkl.
 Uses RRT to plan a collision-free path, avoiding obstacles (e.g., table, walls).
