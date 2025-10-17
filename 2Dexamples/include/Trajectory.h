@@ -1,43 +1,92 @@
 #pragma once
 
 #include <vector>
+#include <Eigen/Dense>
 
 /**
  * @brief Represents a single point along the trajectory with a collision checking radius.
+ * Pure configuration space representation - no workspace coordinates.
  */
 struct PathNode {
-    float x;
-    float y;
-    float radius; // Collision checking radius for this specific point
+    Eigen::VectorXf position;  // N-dimensional configuration space position
+    float radius;              // Collision checking radius
+    
+    // Default constructor
+    PathNode() : position(Eigen::VectorXf::Zero(2)), radius(0.0f) {}
+    
+    // N-dimensional constructor
+    PathNode(const Eigen::VectorXf& pos, float r) : position(pos), radius(r) {}
+    
+    // 2D convenience constructor
+    PathNode(float q1, float q2, float r) : radius(r) {
+        position.resize(2);
+        position << q1, q2;
+    }
+    
+    // 3D convenience constructor
+    PathNode(float q1, float q2, float q3, float r) : radius(r) {
+        position.resize(3);
+        position << q1, q2, q3;
+    }
+    
+    // Get dimensionality
+    size_t dimensions() const { 
+        return static_cast<size_t>(position.size()); 
+    }
 };
 
 /**
  * @brief Represents a sequence of connected PathNodes forming a time-parametrized trajectory.
+ * Pure configuration space representation.
  */
 struct Trajectory {
     std::vector<PathNode> nodes;
     float total_time;       // Total time duration of the trajectory (seconds)
     size_t start_index = 0; // Index of the start node (usually 0)
     size_t goal_index;      // Index of the goal node (usually nodes.size() - 1)
+    
+    // Get dimensionality of the trajectory
+    size_t dimensions() const {
+        return nodes.empty() ? 0 : nodes[0].dimensions();
+    }
 };
 
 /**
- * @brief Linear interpolation function for PathNodes (x, y, radius).
+ * @brief Linear interpolation function for PathNodes (position, radius).
  * @param p1 Start point.
  * @param p2 End point.
  * @param alpha Interpolation parameter (0.0 to 1.0).
  * @return Interpolated point (PathNode).
  */
-static PathNode lerp(const PathNode& p1, const PathNode& p2, float alpha) {
-    float x = p1.x + alpha * (p2.x - p1.x);
-    float y = p1.y + alpha * (p2.y - p1.y);
+inline PathNode lerp(const PathNode& p1, const PathNode& p2, float alpha) {
+    if (p1.dimensions() != p2.dimensions()) {
+        throw std::runtime_error("Cannot interpolate PathNodes with different dimensions");
+    }
+    
+    Eigen::VectorXf position = p1.position + alpha * (p2.position - p1.position);
     float radius = p1.radius + alpha * (p2.radius - p1.radius);
     
-    return {x, y, radius};
+    PathNode result(position, radius);
+    return result;
 }
 
-// Cubic Bezier helper function implementation (uses P0, P1, P2, P3 control points)
-static PathNode cubic_bezier(const PathNode& P0, const PathNode& P1, const PathNode& P2, const PathNode& P3, float t) {
+/**
+ * @brief Cubic Bezier helper function for N-dimensional PathNodes
+ * @param P0 Start control point
+ * @param P1 First intermediate control point
+ * @param P2 Second intermediate control point
+ * @param P3 End control point
+ * @param t Parameter (0.0 to 1.0)
+ * @return Interpolated point
+ */
+inline PathNode cubic_bezier(const PathNode& P0, const PathNode& P1, 
+                             const PathNode& P2, const PathNode& P3, float t) {
+    if (P0.dimensions() != P1.dimensions() || 
+        P1.dimensions() != P2.dimensions() || 
+        P2.dimensions() != P3.dimensions()) {
+        throw std::runtime_error("All control points must have the same dimensions");
+    }
+    
     float one_minus_t = 1.0f - t;
     float one_minus_t2 = one_minus_t * one_minus_t;
     float one_minus_t3 = one_minus_t2 * one_minus_t;
@@ -50,30 +99,43 @@ static PathNode cubic_bezier(const PathNode& P0, const PathNode& P1, const PathN
     float b2 = 3 * one_minus_t * t2;
     float b3 = t3;
 
-    float x = b0 * P0.x + b1 * P1.x + b2 * P2.x + b3 * P3.x;
-    float y = b0 * P0.y + b1 * P1.y + b2 * P2.y + b3 * P3.y;
-    float radius = b0 * P0.radius + b1 * P1.radius + b2 * P2.radius + b3 * P3.radius;
+    // Blend positions using Eigen's vectorized operations
+    Eigen::VectorXf position = b0 * P0.position + b1 * P1.position + 
+                               b2 * P2.position + b3 * P3.position;
+    
+    // Blend radius
+    float radius = b0 * P0.radius + b1 * P1.radius + 
+                   b2 * P2.radius + b3 * P3.radius;
 
-    return {x, y, radius};
+    return PathNode(position, radius);
 }
 
 /**
  * @brief Generates a straight line trajectory between start and goal using linear interpolation.
+ * Works for any dimensionality.
  * @param start Start point of the trajectory.
  * @param goal Goal point of the trajectory.
  * @param num_steps The total number of nodes to generate (including start/goal).
  * @param total_time The total time duration for the trajectory.
  * @return The generated Trajectory structure.
  */
-inline Trajectory generateInterpolatedTrajectoryLinear(const PathNode& start, const PathNode& goal, size_t num_steps, float total_time) {
+inline Trajectory generateInterpolatedTrajectoryLinear(const PathNode& start, 
+                                                       const PathNode& goal, 
+                                                       size_t num_steps, 
+                                                       float total_time) {
     if (num_steps < 2) num_steps = 2;
+    
+    if (start.dimensions() != goal.dimensions()) {
+        throw std::runtime_error("Start and goal must have the same dimensions");
+    }
 
     Trajectory traj;
-    traj.total_time = total_time; // Set total time
+    traj.total_time = total_time;
     traj.goal_index = num_steps - 1;
+    traj.nodes.reserve(num_steps);
     
     for (size_t i = 0; i < num_steps; ++i) {
-        float alpha = (float)i / (num_steps - 1); // 0.0 to 1.0
+        float alpha = static_cast<float>(i) / (num_steps - 1);
         PathNode node = lerp(start, goal, alpha);
         traj.nodes.push_back(node);
     }
@@ -83,58 +145,72 @@ inline Trajectory generateInterpolatedTrajectoryLinear(const PathNode& start, co
 
 /**
  * @brief Generates a smooth trajectory between start and goal using cubic Bezier interpolation.
+ * Works for any dimensionality N >= 2.
  * @param start Start point of the trajectory.
  * @param goal Goal point of the trajectory.
  * @param num_steps The total number of nodes to generate (including start/goal).
  * @param total_time The total time duration for the trajectory.
  * @return The generated Trajectory structure.
  */
-inline Trajectory generateInterpolatedTrajectoryBezier(const PathNode& start, const PathNode& goal, size_t num_steps, float total_time) {
+inline Trajectory generateInterpolatedTrajectoryBezier(const PathNode& start, 
+                                                       const PathNode& goal, 
+                                                       size_t num_steps, 
+                                                       float total_time) {
     if (num_steps < 2) num_steps = 2;
+    
+    if (start.dimensions() != goal.dimensions()) {
+        throw std::runtime_error("Start and goal must have the same dimensions");
+    }
+    
+    const size_t dim = start.dimensions();
+    if (dim < 2) {
+        throw std::runtime_error("Bezier trajectory requires at least 2 dimensions");
+    }
 
     Trajectory traj;
-    traj.total_time = total_time; // Set total time
+    traj.total_time = total_time;
     traj.goal_index = num_steps - 1;
+    traj.nodes.reserve(num_steps);
 
-    // --- Control Point Generation (P1 and P2) ---
-    float dx = goal.x - start.x;
-    float dy = goal.y - start.y;
-    float length = std::sqrt(dx * dx + dy * dy);
+    // Control Point Generation
+    Eigen::VectorXf direction = goal.position - start.position;
+    float length = direction.norm();
+    Eigen::VectorXf n = direction / length;
     
-    // Normalized vector from start to goal
-    float nx = dx / length;
-    float ny = dy / length;
-
-    // Perpendicular vector
-    float px = -ny;
-    float py = nx;
+    // Choose a perpendicular vector for offset
+    Eigen::VectorXf p = Eigen::VectorXf::Zero(dim);
     
-    // Curve magnitude (30% of total length)
-    float curve_mag = 0.3f * length; 
+    if (dim == 2) {
+        p << -n(1), n(0);
+    } else if (dim >= 3) {
+        Eigen::VectorXf candidate = Eigen::VectorXf::Zero(dim);
+        candidate(1) = 1.0f;
+        
+        if (std::abs(n.dot(candidate)) > 0.9f) {
+            candidate = Eigen::VectorXf::Zero(dim);
+            candidate(0) = 1.0f;
+        }
+        
+        p = candidate - n.dot(candidate) * n;
+        p.normalize();
+    }
     
-    // P1: Offset forward and sideways
-    PathNode P1 = {
-        start.x + nx * curve_mag + px * curve_mag,
-        start.y + ny * curve_mag + py * curve_mag,
-        start.radius + 0.33f * (goal.radius - start.radius)
-    };
+    float curve_mag = 0.3f * length;
+    
+    PathNode P1(start.position + n * curve_mag + p * curve_mag,
+                start.radius + 0.33f * (goal.radius - start.radius));
+    PathNode P2(goal.position - n * curve_mag + p * curve_mag,
+                start.radius + 0.66f * (goal.radius - start.radius));
 
-    // P2: Offset backward from goal and sideways
-    PathNode P2 = {
-        goal.x - nx * curve_mag + px * curve_mag,
-        goal.y - ny * curve_mag + py * curve_mag,
-        start.radius + 0.66f * (goal.radius - start.radius)
-    };
-
-    // P0 and P3 are the given start and goal points
-    const PathNode P0 = start;
-    const PathNode P3 = goal;
+    const PathNode& P0 = start;
+    const PathNode& P3 = goal;
 
     for (size_t i = 0; i < num_steps; ++i) {
-        float t = (float)i / (num_steps - 1); // 0.0 to 1.0
+        float t = static_cast<float>(i) / (num_steps - 1);
         PathNode node = cubic_bezier(P0, P1, P2, P3, t);
         traj.nodes.push_back(node);
     }
     
     return traj;
 }
+

@@ -3,8 +3,8 @@ experiment:
   config_file: "config.yaml"  # Will be overwritten with actual path
   random_seed: 999
   log_directory: "./logs"
-  visualize_initial_state: true
-  enable_logging: true
+  visualize_initial_state: false
+  enable_logging: false
 
 environment:
   map_width: 800

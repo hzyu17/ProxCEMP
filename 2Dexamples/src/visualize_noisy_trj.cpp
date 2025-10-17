@@ -1,103 +1,70 @@
 #include <SFML/Graphics.hpp>
 #include <iostream>
 #include <random>
-#include <yaml-cpp/yaml.h> // New include for configuration parsing
+#include <yaml-cpp/yaml.h>
+#include <filesystem>
 
-// Include necessary headers from your project structure
-#include "../include/ObstacleMap.h" // For MAP_WIDTH, MAP_HEIGHT, Obstacle, generateObstacles, NUM_OBSTACLES, OBSTACLE_RADIUS
-#include "../include/Trajectory.h" // For PathNode, Trajectory, generateInterpolatedTrajectoryLinear
-#include "../include/PCEMotionPlanner.h" // For MotionPlanner base class, sampleSmoothnessNoise, BasicPlanner
+#include "../include/ObstacleMap.h"
+#include "../include/Trajectory.h"
+#include "../include/ForwardKinematics.h"
+#include "../include/PCEMotionPlanner.h"
+#include "../include/visualization.h"
 
-// --- Drawing Utilities (Copied and adapted from main.cpp) ---
-
-void drawTrajectorySegments(sf::RenderWindow& window, const Trajectory& trajectory, const sf::Color& color) {
-    if (trajectory.nodes.size() < 2) return;
-
-    sf::VertexArray lines(sf::PrimitiveType::LineStrip, trajectory.nodes.size());
-    for (size_t i = 0; i < trajectory.nodes.size(); ++i) {
-        lines[i].position = sf::Vector2f(trajectory.nodes[i].x, trajectory.nodes[i].y);
-        lines[i].color = color; 
-    }
-    window.draw(lines);
-}
-
-void drawPathNodes(sf::RenderWindow& window, const Trajectory& trajectory, float radius, const sf::Color& color) {
-    for (const auto& node : trajectory.nodes) {
-        sf::CircleShape circle(radius);
-        circle.setFillColor(color);
-        circle.setOrigin(sf::Vector2f(radius, radius));
-        circle.setPosition({node.x, node.y}); 
-        window.draw(circle);
-    }
-}
+// --- Visualization Function ---
 
 /**
- * @brief Draws the obstacles from the environment.
+ * @brief Visualizes smoothness noise distribution N(0, R^-1) in workspace
  */
-void drawObstacles(sf::RenderWindow& window, const std::vector<Obstacle>& obstacles) {
-    for (const auto& obs : obstacles) {
-        sf::CircleShape circle(obs.radius);
-        circle.setFillColor(sf::Color(100, 100, 100, 180)); // Dark grey obstacle
-        circle.setOrigin(sf::Vector2f(obs.radius, obs.radius));
-        circle.setPosition({obs.x, obs.y}); 
-        window.draw(circle);
-    }
-}
-
-
-// --- Main Visualization Function ---
-
-void visualizeNoise(const MotionPlanner& planner, const Trajectory& base_trajectory, const std::vector<Trajectory>& noisy_samples) {
+void visualizeNoise(const std::vector<ObstacleND>& obstacles,
+                    const Trajectory& workspace_base_trajectory, 
+                    const std::vector<Trajectory>& workspace_noisy_samples) {
     
-    // Setup SFML window
-    sf::RenderWindow window(sf::VideoMode({MAP_WIDTH, MAP_HEIGHT}), "Smoothness Noise Visualization (N(0, R^-1))", sf::Style::Titlebar | sf::Style::Close);
+    sf::RenderWindow window(sf::VideoMode({MAP_WIDTH, MAP_HEIGHT}), 
+                           "Smoothness Noise Visualization N(0, R^-1)", 
+                           sf::Style::Titlebar | sf::Style::Close);
     window.setFramerateLimit(60);
 
-    // Get the obstacles from the planner (which now holds the generated list)
-    const std::vector<Obstacle>& obstacles = planner.getObstacles();
+    std::cout << "\n=== Controls ===\n";
+    std::cout << "ESC: Exit\n";
+    std::cout << "================\n\n";
 
-    // Main Loop (Static Display)
     while (window.isOpen()) {
-        // Event handling
         while (const auto event = window.pollEvent()) {
             if (event->is<sf::Event::Closed>()) {
                 window.close();
+            }
+            
+            if (event->is<sf::Event::KeyPressed>()) {
+                const auto& key_event = event->getIf<sf::Event::KeyPressed>();
+                if (key_event->code == sf::Keyboard::Key::Escape) {
+                    window.close();
+                }
             }
         }
         
         window.clear(sf::Color(240, 240, 240));
 
-        // 1. Draw obstacles first
+        // 1. Draw obstacles
         drawObstacles(window, obstacles);
 
-        // 2. Draw all noisy samples (faded blue)
-        // This shows the distribution boundary of the noise
-        for (const auto& sample : noisy_samples) {
-            drawTrajectorySegments(window, sample, sf::Color(50, 50, 255, 30)); // Low alpha for many paths
+        // 2. Draw all noisy samples (faded blue cloud)
+        for (const auto& sample : workspace_noisy_samples) {
+            drawTrajectorySegments(window, sample, sf::Color(50, 50, 255, 30));
         }
 
-        // 3. Draw the base trajectory (thick red line, high visibility)
-        drawTrajectorySegments(window, base_trajectory, sf::Color(255, 0, 0, 255));
-        drawPathNodes(window, base_trajectory, 3.0f, sf::Color(255, 100, 100));
+        // 3. Draw base trajectory (red line)
+        drawTrajectorySegments(window, workspace_base_trajectory, sf::Color(255, 0, 0, 255));
         
-        // 4. Draw Start/Goal nodes (Fixed points)
-        if (!base_trajectory.nodes.empty()) {
-            const PathNode& start_node = base_trajectory.nodes[base_trajectory.start_index];
-            const PathNode& goal_node = base_trajectory.nodes[base_trajectory.goal_index];
-            
-            // Start node (Green)
-            sf::CircleShape start_circle(6.0f);
-            start_circle.setFillColor(sf::Color::Green);
-            start_circle.setOrigin({6.0f, 6.0f});
-            start_circle.setPosition({start_node.x, start_node.y});
-            window.draw(start_circle);
-
-            // Goal node (Red)
-            sf::CircleShape goal_circle(6.0f);
-            goal_circle.setFillColor(sf::Color::Red);
-            goal_circle.setOrigin({6.0f, 6.0f});
-            goal_circle.setPosition({goal_node.x, goal_node.y});
-            window.draw(goal_circle);
+        for (const auto& node : workspace_base_trajectory.nodes) {
+            drawNode(window, node, 3.0f, sf::Color(255, 100, 100));
+        }
+        
+        // 4. Draw Start/Goal
+        if (!workspace_base_trajectory.nodes.empty()) {
+            drawNode(window, workspace_base_trajectory.nodes[workspace_base_trajectory.start_index], 
+                    8.0f, sf::Color::Green);
+            drawNode(window, workspace_base_trajectory.nodes[workspace_base_trajectory.goal_index], 
+                    8.0f, sf::Color::Red);
         }
 
         window.display();
@@ -106,99 +73,148 @@ void visualizeNoise(const MotionPlanner& planner, const Trajectory& base_traject
 
 
 int main() {
-    std::cout << "--- Trajectory Noise Visualization ---\n";
+    std::cout << "========================================\n";
+    std::cout << "  Trajectory Noise Visualization\n";
+    std::cout << "  (Smoothness Distribution N(0, R^-1))\n";
+    std::cout << "========================================\n\n";
 
-    // --- 1. Setup Parameters (Defaults) ---
-    int numNodes = 100;
-    float totalTime = 10.0f; 
-    float nodeRadius = 5.0f;
-    const size_t numSamples = 500; // Fixed visualization parameter
+    // --- 1. Get Config File Path ---
+    std::filesystem::path source_path(__FILE__);
+    std::filesystem::path source_dir = source_path.parent_path();
+    std::filesystem::path config_path = source_dir / "../configs/config.yaml";
+    std::string config_file = std::filesystem::canonical(config_path).string();
+    
+    std::cout << "Loading config from: " << config_file << "\n\n";
 
+    // --- 2. Read Visualization Parameters ---
     YAML::Node config;
-
-    // --- 1b. Read Config File ---
+    size_t numSamples = 500;
+    
     try {
-        config = YAML::LoadFile("../configs/config.yaml");
-
-        if (config["motion_planning"]) {
-            const YAML::Node& mp_config = config["motion_planning"];
-            if (mp_config["num_discretization"]) {
-                numNodes = mp_config["num_discretization"].as<int>();
-            }
-            // NOTE: Interpreting 'total_time' as 'totalTime' (trajectory duration)
-            if (mp_config["total_time"]) {
-                totalTime = mp_config["total_time"].as<float>();
-            }
-            if (mp_config["node_collision_radius"]) {
-                nodeRadius = mp_config["node_collision_radius"].as<float>();
-            }
-        } else {
-            std::cerr << "Warning: 'motion_planning' section not found in config.yaml. Using defaults.\n";
+        config = YAML::LoadFile(config_file);
+        
+        // Optional: add visualization section to config.yaml
+        if (config["visualization"] && config["visualization"]["num_noise_samples"]) {
+            numSamples = config["visualization"]["num_noise_samples"].as<size_t>();
         }
-    } catch (const YAML::BadFile& e) {
-        std::cerr << "Warning: Could not open config.yaml. Using default values.\n";
-    } catch (const YAML::Exception& e) {
-        std::cerr << "Error parsing config.yaml: " << e.what() << ". Using default values.\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Could not read visualization config: " << e.what() << "\n";
+        std::cerr << "Using default: " << numSamples << " samples\n\n";
     }
+    
+    std::cout << "Visualization: " << numSamples << " noise samples\n\n";
 
-    // Log the read values
-    std::cout << "Config loaded:\n";
-    std::cout << "  Initial Nodes: " << numNodes << "\n";
-    std::cout << "  Total Time (Initial Step Size): " << totalTime << "\n";
-    std::cout << "  Node Radius: " << nodeRadius << "\n";
+    // --- 3. Initialize Planner ---
+    std::cout << "Initializing planner (no optimization)...\n";
+    ProximalCrossEntropyMotionPlanner planner;
     
-    // --- 1c. Define Start/Goal ---
-    PathNode start = {50.0f, 550.0f, nodeRadius};
-    PathNode goal = {750.0f, 50.0f, nodeRadius};
+    // Initialize without running optimization
+    // We'll use a helper method that only does setup
+    if (!planner.initializeOnly(config_file)) {
+        std::cerr << "Failed to initialize planner!\n";
+        return 1;
+    }
     
-    // Generate actual obstacles
-    std::vector<Obstacle> obstacles = generateObstacles(NUM_OBSTACLES, OBSTACLE_RADIUS, MAP_WIDTH, MAP_HEIGHT); 
+    std::cout << "Planner initialized successfully!\n\n";
 
-    // --- 2. Initialize Motion Planner (used only for noise sampling and R matrix) ---
-    float clearance_dist = 100.0;
-    // Pass the generated obstacles to the planner and use configured parameters
-    ProximalCrossEntropyMotionPlanner planner(obstacles, config);
-    planner.initialize(start, goal, numNodes, totalTime, InterpolationMethod::LINEAR, obstacles, clearance_dist);
+    // Get trajectory and environment
+    const Trajectory& config_trajectory = planner.getCurrentTrajectory();
+    const std::vector<ObstacleND>& obstacles = planner.getObstacles();
+    const size_t N = config_trajectory.nodes.size();
+    const size_t D = config_trajectory.dimensions();
     
-    const Trajectory& base_trajectory = planner.getCurrentTrajectory();
-    const size_t N = base_trajectory.nodes.size();
-    
-    // --- 3. Generate Noise Samples (epsilon) ---
-    std::mt19937 rng; // Standard RNG engine
-    std::vector<std::vector<float>> epsilon_x_samples(numSamples);
-    std::vector<std::vector<float>> epsilon_y_samples(numSamples);
-    
-    std::cout << "Generating " << numSamples << " smoothness noise samples for " << N << " nodes...\n";
+    std::cout << "Configuration:\n";
+    std::cout << "  Trajectory nodes: " << N << "\n";
+    std::cout << "  Dimensions: " << D << "\n";
+    std::cout << "  Obstacles: " << obstacles.size() << "\n\n";
 
+    // --- 4. Setup Random Number Generator ---
+    std::mt19937 rng;
+    unsigned int seed = 42;
+    if (config["experiment"] && config["experiment"]["random_seed"]) {
+        seed = config["experiment"]["random_seed"].as<unsigned int>();
+    }
+    rng.seed(seed);
+    std::cout << "Random seed: " << seed << "\n\n";
+
+    // --- 5. Generate Noise Samples ---
+    std::cout << "Generating " << numSamples << " noise samples from N(0, R^-1)...\n";
+    
+    std::vector<Eigen::MatrixXf> epsilon_samples = planner.sampleNoiseMatrices(numSamples, N, D);
+    
+    std::cout << "Noise sampling complete!\n\n";
+
+    // --- 6. Create Perturbed Trajectories ---
+    std::cout << "Creating perturbed trajectories...\n";
+    
+    Eigen::MatrixXf Y_base = planner.trajectoryToMatrix();
+    std::vector<Trajectory> config_noisy_samples;
+    config_noisy_samples.reserve(numSamples);
+    
     for (size_t m = 0; m < numSamples; ++m) {
-        epsilon_x_samples[m] = planner.sampleSmoothnessNoise(N, rng);
-        epsilon_y_samples[m] = planner.sampleSmoothnessNoise(N, rng);
-    }
-
-    // --- 4. Create Noisy Sample Trajectories (Y + epsilon) ---
-    std::vector<Trajectory> noisy_samples;
-    noisy_samples.reserve(numSamples);
-
-    std::vector<float> Y_base_x(N);
-    std::vector<float> Y_base_y(N);
-    for (size_t i = 0; i < N; ++i) {
-        Y_base_x[i] = base_trajectory.nodes[i].x;
-        Y_base_y[i] = base_trajectory.nodes[i].y;
+        Trajectory perturbed_traj = planner.createPerturbedTrajectory(Y_base, epsilon_samples[m]);
+        config_noisy_samples.push_back(perturbed_traj);
+        
+        if ((m + 1) % 100 == 0) {
+            std::cout << "  Created " << (m + 1) << "/" << numSamples << " trajectories\n";
+        }
     }
     
+    std::cout << "Perturbed trajectories created!\n\n";
+
+    // --- 7. Apply Forward Kinematics (Config → Workspace) ---
+    std::cout << "Applying forward kinematics to workspace...\n";
+    
+    auto fk = planner.getForwardKinematics();
+    Trajectory workspace_base = fk->apply(config_trajectory);
+    
+    std::vector<Trajectory> workspace_noisy_samples;
+    workspace_noisy_samples.reserve(numSamples);
+    
     for (size_t m = 0; m < numSamples; ++m) {
-        Trajectory perturbed_traj = base_trajectory;
+        workspace_noisy_samples.push_back(fk->apply(config_noisy_samples[m]));
+        
+        if ((m + 1) % 100 == 0) {
+            std::cout << "  Transformed " << (m + 1) << "/" << numSamples << " samples\n";
+        }
+    }
+    std::cout << "Workspace transformation complete!\n\n";
+
+    // --- 8. Compute Noise Statistics ---
+    float total_perturbation = 0.0f;
+    float max_perturbation = 0.0f;
+    
+    for (size_t m = 0; m < numSamples; ++m) {
         for (size_t i = 0; i < N; ++i) {
-            perturbed_traj.nodes[i].x = Y_base_x[i] + epsilon_x_samples[m][i];
-            perturbed_traj.nodes[i].y = Y_base_y[i] + epsilon_y_samples[m][i];
+            Eigen::VectorXf diff = workspace_noisy_samples[m].nodes[i].position 
+                                  - workspace_base.nodes[i].position;
+            float perturbation = diff.norm();
+            
+            total_perturbation += perturbation;
+            max_perturbation = std::max(max_perturbation, perturbation);
         }
-        noisy_samples.push_back(perturbed_traj);
     }
     
-    std::cout << "Generated " << noisy_samples.size() << " perturbed trajectories.\n";
+    float avg_perturbation = total_perturbation / (numSamples * N);
+    
+    std::cout << "=== Noise Statistics (Workspace) ===\n";
+    std::cout << "  Average perturbation: " << avg_perturbation << " units\n";
+    std::cout << "  Maximum perturbation: " << max_perturbation << " units\n";
+    std::cout << "  Total samples: " << numSamples << "\n";
+    std::cout << "  Nodes per trajectory: " << N << "\n\n";
+    
+    std::cout << "Visualization Legend:\n";
+    std::cout << "  Blue cloud    = Noise distribution N(0, R^-1)\n";
+    std::cout << "  Red line      = Base trajectory (mean)\n";
+    std::cout << "  Green dot     = Start position\n";
+    std::cout << "  Red dot       = Goal position\n";
+    std::cout << "  Gray circles  = Obstacles\n\n";
+    
+    std::cout << "Opening visualization window...\n";
 
-    // --- 5. Visualize ---
-    visualizeNoise(planner, base_trajectory, noisy_samples);
+    // --- 9. Visualize ---
+    visualizeNoise(obstacles, workspace_base, workspace_noisy_samples);
 
+    std::cout << "\nVisualization closed. Exiting.\n";
     return 0;
 }

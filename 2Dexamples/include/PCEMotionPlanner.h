@@ -1,271 +1,207 @@
 #pragma once
 
-#include "MotionPlanner.h"
-#include <yaml-cpp/yaml.h> 
+#include "MotionPlanner.h" 
+#include <Eigen/Dense>
+#include <iostream>
+#include <random>
+#include <algorithm>
+#include <cmath>
 
 /**
  * @brief Proximal Cross-Entropy Method (PCEM) for Trajectory Optimization.
- * This class is header-only, with all methods implemented inline.
+ * Fully Eigen-based implementation supporting arbitrary N-dimensional configuration spaces.
  */
 class ProximalCrossEntropyMotionPlanner : public MotionPlanner {
 public:
-    ProximalCrossEntropyMotionPlanner(const std::vector<Obstacle>& obs, const YAML::Node& config)
-        : obstacles_(obs)
-    {
-        // Initialize random engine (using a time-based seed)
-        std::random_device rd;
-        random_engine_.seed(rd());
+    using MatrixXf = Eigen::MatrixXf;
+    using VectorXf = Eigen::VectorXf;
+    using SparseMatrixXf = Eigen::SparseMatrix<float>;
+    
 
-        // Read hyperparameters from the YAML config
-        if (config["pce_planner"]) {
-            const YAML::Node& planner_config = config["pce_planner"];
-            
-            if (planner_config["num_samples"]) {
-                num_samples_ = planner_config["num_samples"].as<size_t>();
-            } else {
-                throw std::runtime_error("Required parameter 'num_samples' not found in pce_planner section.");
-            }
-
-            if (planner_config["num_iterations"]) {
-                num_iterations_ = planner_config["num_iterations"].as<size_t>();
-            } else {
-                throw std::runtime_error("Required parameter 'num_iterations' not found in pce_planner section.");
-            }
-            
-            if (planner_config["temperature"]) {
-                temperature_ = planner_config["temperature"].as<float>();
-            } else {
-                throw std::runtime_error("Required parameter 'temperature' not found in pce_planner section.");
-            }
-
-            if (planner_config["eta"]) {
-                eta_ = planner_config["eta"].as<float>();
-                gamma_ = eta_ / (eta_ + 1);
-            } else {
-                throw std::runtime_error("Required parameter 'eta' not found in pce_planner section.");
-            }
-            
-            if (planner_config["convergence_threshold"]) {
-                convergence_threshold_ = planner_config["convergence_threshold"].as<float>();
-            } else {
-                throw std::runtime_error("Required parameter 'convergence_threshold' not found in pce_planner section.");
-            }
-            
-            // Read obstacle cost parameters
-            if (planner_config["cost"]) {
-                const YAML::Node& cost_config = planner_config["cost"];
-                if (cost_config["epsilon_sdf"]) {
-                    epsilon_sdf_ = cost_config["epsilon_sdf"].as<float>();
-                } else {
-                    throw std::runtime_error("Required parameter 'epsilon_sdf' not found in cost section.");
-                }
-
-                if (cost_config["sigma_obs"]) {
-                    sigma_obs_ = cost_config["sigma_obs"].as<float>();
-                } else {
-                    throw std::runtime_error("Required parameter 'sigma_obs' not found in cost section.");
-                }
-            } else {
-                throw std::runtime_error("Required section 'cost' not found in pce_planner section.");
-            }
-        } else {
-            std::cerr << "Warning: 'pce_planner' section not found in config.yaml. Using default hyperparameters.\n";
+    /**
+     * @brief Solve the motion planning problem using PCEM
+     */
+    bool solve(const std::string& config_file_path) override {
+        // Load planner-specific config
+        if (!loadPlannerConfig(config_file_path)) {
+            return false;
         }
         
-        std::cout << "PCEM planner initialized with hyperparameters:\n"
-                  << "  num_samples: " << num_samples_ << "\n"
-                  << "  num_iterations: " << num_iterations_ << "\n"
-                  << "  temperature: " << temperature_ << "\n"
-                  << "  eta: " << eta_ << "\n"
-                  << "  gamma: " << gamma_ << "\n"
-                  << "  convergence_threshold: " << convergence_threshold_ << "\n"
-                  << "  epsilon_sdf: " << epsilon_sdf_ << "\n"
-                  << "  sigma_obs: " << sigma_obs_ << "\n";
+        // Call base class solve (handles everything)
+        return MotionPlanner::solve(config_file_path);
+    }
+
+    // Constructor
+    ProximalCrossEntropyMotionPlanner()
+    {
+        // Initialize random engine
+        std::random_device rd;
+        seedRandomEngine(rd());
+    }
+
+    std::string getPlannerName() const override {
+        return "PCEM";
     }
 
     /**
-     * @brief Runs the PCEM optimization loop.
+     * @brief Initializes the trajectory and precomputes the Cholesky factorization L0.
+     */
+    virtual void initialize(const PathNode& start, 
+                            const PathNode& goal, 
+                            size_t num_nodes, 
+                            float total_time, 
+                            InterpolationMethod method, 
+                            ObstacleMap& obstacle_map,
+                            float clearance_dist) override
+    {
+        // 1. Call base class initialize to set up current_trajectory_
+        MotionPlanner::initialize(start, goal, num_nodes, total_time, method, obstacle_map, clearance_dist);
+
+        const size_t N = current_trajectory_.nodes.size();
+
+        if (N < 2) {
+            throw std::invalid_argument("num_nodes must be >= 2");
+        }
+        
+    }
+
+    const std::vector<ObstacleND>& getObstacles() const override {
+        return obstacles_;
+    }
+
+    size_t getNumSamples() const { return num_samples_; }
+    size_t getNumIterations() const { return num_iterations_; }
+    float getTemperature() const { return temperature_; }
+    float getEta() const { return eta_; }
+    float getGamma() const { return gamma_; }
+    float getConvergenceThreshold() const { return convergence_threshold_; }
+    float getEpsilonSdf() const { return epsilon_sdf_; }
+    float getSigmaObs() const { return sigma_obs_; }
+
+    void seedRandomEngine(unsigned int seed) {
+        random_engine_.seed(seed);
+    }
+
+    const SparseMatrixXf& getRMatrix() const {
+        return R_matrix_;
+    }
+
+protected:
+
+    /**
+     * @brief Runs the PCEM optimization loop. (Eigen Implementation, full history preserved)
      */
     bool optimize() override {
-        std::cout << "\n--- Starting PCEM Optimization ---\n";
-        std::cout << "Update Rule: Y_{k+1} = Σ w_m (Y_k + ε_m), where w ∝ exp(-γ(S(Ỹ) - Ỹ^T*R*Y_k))\n\n";
+
+        log("\n--- Starting PCEM Optimization ---\n");
+        log("Update Rule: Y_{k+1} = Σ w_m (Y_k + ε_m), where w ∝ exp(-γ(S(Ỹ) + ε^T*R*Y_k))\n\n");
         
         const size_t N = current_trajectory_.nodes.size();
         const size_t M = num_samples_;
+        const size_t D = num_dimensions_;
         
-        // Store initial trajectory Y_0 (Iteration 0)
-        storeTrajectory();
-        float cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
+        if (N < 3 || current_trajectory_.dimensions() != D) {
+            std::cerr << "Error: Trajectory size, dimensionality mismatch, or not initialized correctly.\n";
+            return false;
+        }
+
+        float collision_cost = computeCollisionCost(current_trajectory_, obstacles_);
+        float smoothness_cost = computeSmoothnessCost(current_trajectory_);
+        
+        float cost = collision_cost + smoothness_cost;
 
         float alpha = 0.99f;
-        float alpha_temp = 0.99f;
+        float alpha_temp = 1.01f;
 
         float best_cost = cost;
         size_t best_iteration = 0;
+
+        storeTrajectory();
         
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
 
-            // Update the learning rate iteratively 
+            // Update parameters
             gamma_ = gamma_ * std::pow(alpha, iteration-1);
-
-            // Adaptive temperature
             temperature_ = temperature_ * alpha_temp;
 
-            std::cout << "------- Iteration " << iteration << " : Cost = " << cost << "------ \n";
+            logf("------- Iteration %zu : Cost = %.2f ------ ", iteration, cost);
+            logf("Collision Cost = %.4f, Smoothness Cost = %.4f", collision_cost, smoothness_cost);
 
-            float collision_cost = computeCollisionCost(current_trajectory_, obstacles_);
-            float smoothness_cost = computeSmoothnessCost(current_trajectory_);
-            std::cout << "Collision cost: " << collision_cost 
-                    << ", Smoothness cost: " << smoothness_cost << "\n";
-                    
-            std::cout << "Iteration " << iteration << " - Sampling " << M << " trajectories...\n";
+            // Extract trajectory as matrix
+            Eigen::MatrixXf Y_k = trajectoryToMatrix();
+
+            // Sample noise matrices
+            std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
             
-            // --- Step 1: Sample M noise vectors ---
-            std::vector<std::vector<float>> epsilon_x_samples(M);
-            std::vector<std::vector<float>> epsilon_y_samples(M);
-            
-            for (size_t m = 0; m < M; ++m) {
-                epsilon_x_samples[m] = sampleSmoothnessNoise(N, random_engine_);
-                epsilon_y_samples[m] = sampleSmoothnessNoise(N, random_engine_);
-            }
-            
-            // --- Step 2: Extract Y_k (current trajectory) as vectors ---
-            std::vector<float> Y_k_x(N);
-            std::vector<float> Y_k_y(N);
-            for (size_t i = 0; i < N; ++i) {
-                Y_k_x[i] = current_trajectory_.nodes[i].x;
-                Y_k_y[i] = current_trajectory_.nodes[i].y;
-            }
-            
-            // --- Step 3: Compute R * Y_k for bias correction term ---
-            std::vector<float> R_Y_k_x = applyRMatrix(Y_k_x);
-            std::vector<float> R_Y_k_y = applyRMatrix(Y_k_y);
-            
-            // --- Step 4: Evaluate costs and compute weights ---
-            std::vector<float> weights(M);
-            std::vector<Trajectory> sampled_trajectories(M);
+            // Compute weights
+            Eigen::VectorXf weights(M);
             float max_exponent = -std::numeric_limits<float>::infinity();
-            
-            // Diagnostics
-            std::vector<float> collision_costs(M);
-            std::vector<float> bias_terms(M);
-            
+
             for (size_t m = 0; m < M; ++m) {
-                // Create sampled trajectory: Ỹ = Y_k + ε_m
-                sampled_trajectories[m] = current_trajectory_;
-                for (size_t i = 0; i < N; ++i) {
-                    sampled_trajectories[m].nodes[i].x = Y_k_x[i] + epsilon_x_samples[m][i];
-                    sampled_trajectories[m].nodes[i].y = Y_k_y[i] + epsilon_y_samples[m][i];
+                // ✓ Create perturbed trajectory
+                Trajectory sample_traj = createPerturbedTrajectory(Y_k, epsilon_samples[m]);
+            
+                // Compute collision cost
+                float sample_collision = computeCollisionCost(sample_traj, obstacles_);
+                
+                // Regularization term per dimension
+                float reg_term = 0.0f;
+                for (size_t d = 0; d < D; ++d) {
+                    // Extract full vectors for dimension d
+                    Eigen::VectorXf epsilon_d = epsilon_samples[m].row(d).transpose();  // N x 1
+                    Eigen::VectorXf Y_k_d = Y_k.row(d).transpose();  // N x 1
+                    
+                    // Compute ε^T * R * Y for this dimension
+                    // Note: R_matrix_ is sparse, so use sparse matrix-vector multiply
+                    Eigen::VectorXf R_Y_d = R_matrix_ * Y_k_d;
+                    reg_term += epsilon_d.dot(R_Y_d);
                 }
-                
-                // Compute collision cost S(Ỹ)
-                float collision_cost = computeCollisionCost(sampled_trajectories[m], obstacles_);
-                
-                // Compute bias term: Ỹ^T * R * Y_k = (Y_k + ε)^T * R * Y_k
-                // Since Y_k^T * R * Y_k is constant across samples, we only need ε^T * R * Y_k
-                float bias_x = 0.0f;
-                float bias_y = 0.0f;
-                for (size_t i = 0; i < N; ++i) {
-                    bias_x += epsilon_x_samples[m][i] * R_Y_k_x[i];
-                    bias_y += epsilon_y_samples[m][i] * R_Y_k_y[i];
-                }
-                float bias_term = bias_x + bias_y;
-                
-                // Store for diagnostics
-                collision_costs[m] = collision_cost;
-                bias_terms[m] = bias_term;
-                
-                // Compute exponent: -γ * (S(Ỹ) - Ỹ^T * R * Y_k)
-                // Equivalently: -γ * (S(Ỹ) - ε^T * R * Y_k) since constant cancels in normalization
-                float exponent = -gamma_ * (collision_cost + bias_term) / temperature_;
-                
-                // Track maximum for numerical stability
+
+                float exponent = -gamma_ * (sample_collision + reg_term) / temperature_;
+
                 if (exponent > max_exponent) {
                     max_exponent = exponent;
                 }                
-                weights[m] = exponent;  // Store exponent temporarily
+                weights(m) = exponent; 
             }
             
-            // Print diagnostic statistics
-            auto minmax_collision = std::minmax_element(collision_costs.begin(), collision_costs.end());
-            auto minmax_bias = std::minmax_element(bias_terms.begin(), bias_terms.end());
-            std::cout << "Collision cost range: [" << *minmax_collision.first << ", " 
-                      << *minmax_collision.second << "]\n";
-            std::cout << "Bias term range: [" << *minmax_bias.first << ", " 
-                      << *minmax_bias.second << "]\n";
-
-            // Print statistics BEFORE exp
-            float min_log_weight = *std::min_element(weights.begin(), weights.end());
-            float max_log_weight = *std::max_element(weights.begin(), weights.end());
-            std::cout << "Log-weight range: [" << min_log_weight << ", " << max_log_weight 
-                    << "], span = " << (max_log_weight - min_log_weight) << "\n";
-            
-            // --- Step 5: Normalize weights (subtract max for numerical stability) ---
-            float weight_sum = 0.0f;
-            for (size_t m = 0; m < M; ++m) {
-                weights[m] = std::exp(weights[m] - max_exponent);
-                weight_sum += weights[m];
-            }
-            
-            // Normalize to sum to 1
-            for (size_t m = 0; m < M; ++m) {
-                weights[m] /= weight_sum;
-            }
-
-            // After normalization, check weight distribution
-            std::vector<float> sorted_weights = weights;
-            std::sort(sorted_weights.begin(), sorted_weights.end(), std::greater<float>());
-            std::cout << "Top 5 weights: ";
-            for (size_t i = 0; i < std::min(5ul, M); ++i) {
-                std::cout << sorted_weights[i] << " ";
-            }
-            std::cout << "\nBottom 5 weights: ";
-            for (size_t i = M-5; i < M; ++i) {
-                std::cout << sorted_weights[i] << " ";
-            }
-            std::cout << "\nMax weight: " << sorted_weights[0] << "\n";
+            // --- Step 5: Normalize weights ---
+            weights = (weights.array() - max_exponent).exp();
+            float weight_sum = weights.sum();
+            weights /= weight_sum;
             
             // --- Step 6: Compute Y_{k+1} via weighted mean update ---
-            // Y_{k+1} = Σ w_m (Y_k + ε_m)
-            std::vector<float> Y_kplus1_x(N, 0.0f);
-            std::vector<float> Y_kplus1_y(N, 0.0f);
-            
+            MatrixXf Y_kplus1 = MatrixXf::Zero(D, N);
             for (size_t m = 0; m < M; ++m) {
-                for (size_t i = 0; i < N; ++i) {
-                    Y_kplus1_x[i] += weights[m] * sampled_trajectories[m].nodes[i].x;
-                    Y_kplus1_y[i] += weights[m] * sampled_trajectories[m].nodes[i].y;
-                }
+                Eigen::MatrixXf temp = Y_k + epsilon_samples[m];
+                Y_kplus1 += weights(m) * temp;
+                // Y_kplus1 += weights(m) * (Y_k + epsilon_samples[m]);
             }
-            
-            // --- Step 7: Update current trajectory: Y_k ← Y_{k+1} ---
-            for (size_t i = 0; i < N; ++i) {
-                current_trajectory_.nodes[i].x = Y_kplus1_x[i];
-                current_trajectory_.nodes[i].y = Y_kplus1_y[i];
-            }
+            updateTrajectoryFromMatrix(Y_kplus1);
+
+            // Fix start and goal
+            current_trajectory_.nodes[0].position = start_node_.position;
+            current_trajectory_.nodes[N - 1].position = goal_node_.position;
+
+            log("  Updated trajectory computed.\n");
             
             // --- Step 8: Store Y_{k+1} and check convergence ---
             storeTrajectory();
-            float new_cost = computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_);
 
+            // ✓ RECALCULATE costs for the updated trajectory
+            collision_cost = computeCollisionCost(current_trajectory_, obstacles_);
+            smoothness_cost = computeSmoothnessCost(current_trajectory_);
+            float new_cost = collision_cost + smoothness_cost;
+            
             // Track best trajectory
             if (new_cost < best_cost) {
                 best_cost = new_cost;
                 best_iteration = iteration;
             }
             
-            // Compute effective sample size (ESS) for diagnostics
-            float ess = 0.0f;
-            for (size_t m = 0; m < M; ++m) {
-                ess += weights[m] * weights[m];
-            }
-            ess = 1.0f / ess;
-            
-            std::cout << "Iteration " << iteration << ": Cost = " << new_cost 
-                    << ", ESS = " << ess << "/" << M << "\n";
-            
             // Check if cost improvement is too small
             if (iteration > 1 && std::abs(cost - new_cost) < convergence_threshold_ && cost - new_cost > 0) {
-                std::cout << "Cost improvement negligible. Stopping.\n";
+                log("Cost improvement negligible. Stopping.\n");
                 break;
             }
             
@@ -275,110 +211,115 @@ public:
         // Restore the best trajectory found during optimization
         if (best_iteration < trajectory_history_.size()) {
             current_trajectory_ = trajectory_history_[best_iteration];
-
-            std::cout << "\n*** Restoring best trajectory from iteration " << best_iteration 
-                      << " with cost " << best_cost << " ***\n";
-
-            // Remove all trajectories after the best iteration
-            trajectory_history_.erase(
-                trajectory_history_.begin() + best_iteration + 1,
-                trajectory_history_.end()
-            );
-
+            logf("\n*** Restoring best trajectory from iteration %zu with cost %.2f ***", best_iteration, best_cost);
+            
+            // History truncation removed: all trajectories are kept for visualization.
         }
         
-        std::cout << "PCEM finished. Final Cost: " << computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_) << "\n";
+        logf("PCEM finished. Final Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
+         computeCollisionCost(current_trajectory_, obstacles_) + computeSmoothnessCost(current_trajectory_), 
+         computeCollisionCost(current_trajectory_, obstacles_), 
+         computeSmoothnessCost(current_trajectory_));
+
+        log("\nLog saved to: " + getLogFilename());
+
         return true;
     }
 
     /**
-     * @brief Provides access to the obstacle map (required by MotionPlanner base class).
+     * @brief Load PCEM-specific configuration
      */
-    const std::vector<Obstacle>& getObstacles() const override {
-        return obstacles_;
+    bool loadPlannerConfig(const std::string& config_file_path) {
+        try {
+            YAML::Node config = YAML::LoadFile(config_file_path);
+            
+            if (!config["pce_planner"]) {
+                std::cerr << "Error: 'pce_planner' section not found in config\n";
+                return false;
+            }
+            
+            const YAML::Node& planner_config = config["pce_planner"];
+            
+            // Read hyperparameters
+            num_samples_ = planner_config["num_samples"].as<size_t>();
+            num_iterations_ = planner_config["num_iterations"].as<size_t>();
+            temperature_ = planner_config["temperature"].as<float>();
+            eta_ = planner_config["eta"].as<float>();
+            convergence_threshold_ = planner_config["convergence_threshold"].as<float>();
+            
+            // Compute gamma from eta
+            gamma_ = eta_ / temperature_;
+            
+            // Read cost parameters
+            if (planner_config["cost"]) {
+                const YAML::Node& cost_config = planner_config["cost"];
+                epsilon_sdf_ = cost_config["epsilon_sdf"].as<float>();
+                sigma_obs_ = cost_config["sigma_obs"].as<float>();
+            }
+            
+            // std::cout << "PCEM hyperparameters loaded:\n"
+            //           << "  num_samples: " << num_samples_ << "\n"
+            //           << "  num_iterations: " << num_iterations_ << "\n"
+            //           << "  temperature: " << temperature_ << "\n"
+            //           << "  eta: " << eta_ << "\n"
+            //           << "  gamma: " << gamma_ << "\n";
+            
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "Error loading PCEM config: " << e.what() << "\n";
+            return false;
+        }
     }
 
-private:
-    const std::vector<Obstacle>& obstacles_;
 
-    size_t num_samples_ = 100;
-    size_t num_iterations_ = 10;
-    float temperature_ = 1.0f;
-    float eta_ = 1.0;
-    float gamma_ = 1.0;
-    float convergence_threshold_ = 0.01f;
+    void logPlannerSpecificConfig() override {
+        log("--- PCEM Planner Parameters ---");
+        log("  Algorithm:            Proximal Cross-Entropy Method");
+        logf("  Number of samples:    %zu", num_samples_);
+        logf("  Number of iterations: %zu", num_iterations_);
+        logf("  Initial temperature:  %.4f", temperature_);
+        logf("  Temperature scaling:  %.4f (alpha_temp)", 1.01f);
+        logf("  Initial eta:          %.4f", eta_);
+        logf("  Initial gamma:        %.4f", gamma_);
+        logf("  Gamma decay:          %.4f (alpha)", 0.99f);
+        logf("  Convergence threshold: %.6f", convergence_threshold_);
+        log("");
+        
+        log("--- Cost Function Parameters ---");
+        logf("  Epsilon SDF:          %.2f", epsilon_sdf_);
+        logf("  Sigma obs:            %.4f", sigma_obs_);
+        log("");
+    }
 
-    // Cost function parameters
-    float epsilon_sdf_ = 20.0f;
-    float sigma_obs_ = 1.0f;
     
-    // Internal state for optimization
+private:
+    size_t num_samples_ = 3000;
+    size_t num_iterations_ = 10;
+    float temperature_ = 1.5f;
+    float eta_ = 1.0f;
+    float gamma_ = 0.5f;
+    float convergence_threshold_ = 0.01f;
+    
     std::mt19937 random_engine_;
 
-    /**
-     * @brief Applies the R matrix to a vector: computes R * epsilon
-     * R is a pentadiagonal smoothness matrix
-     */
-    std::vector<float> applyRMatrix(const std::vector<float>& epsilon) const {
-        const size_t N = epsilon.size();
-        if (N < 3) return epsilon;
+    Trajectory matrixToTrajectory(const MatrixXf& positions, const Trajectory& reference) const {
+        Trajectory traj;
+        traj.total_time = reference.total_time;
+        traj.start_index = reference.start_index;
+        traj.goal_index = reference.goal_index;
         
-        // Get R matrix diagonals
-        RMatrixDiagonals R_bands = getSmoothnessMatrixRDiagonals(N);
-        
-        // R * epsilon for pentadiagonal matrix
-        std::vector<float> result(N, 0.0f);
+        const size_t N = positions.rows();
+        traj.nodes.reserve(N);
         
         for (size_t i = 0; i < N; ++i) {
-            // Main diagonal
-            result[i] += R_bands.main_diag[i] * epsilon[i];
+            VectorXf position(num_dimensions_);
+            position = positions.row(i).transpose();
             
-            // First off-diagonal (upper and lower due to symmetry)
-            if (i > 0) {
-                result[i] += R_bands.diag1[i-1] * epsilon[i-1];
-            }
-            if (i < N - 1) {
-                result[i] += R_bands.diag1[i] * epsilon[i+1];
-            }
-            
-            // Second off-diagonal (upper and lower due to symmetry)
-            if (i > 1) {
-                result[i] += R_bands.diag2[i-2] * epsilon[i-2];
-            }
-            if (i < N - 2) {
-                result[i] += R_bands.diag2[i] * epsilon[i+2];
-            }
+            float radius = (i < reference.nodes.size()) ? reference.nodes[i].radius : 0.5f;
+            PathNode node(position, radius);
+            traj.nodes.push_back(node);
         }
         
-        return result;
-    }
-
-
-public:
-    float computeCollisionCost(const Trajectory& traj, const std::vector<Obstacle>& obstacles) const {
-        float total_cost = 0.0f;
-        
-        // For each node in trajectory
-        for (const auto& node : traj.nodes) {
-            float x = node.x;
-            float y = node.y;
-            
-            // Compute hinge loss for each obstacle
-            for (const auto& obs : obstacles) {
-                // Signed distance to obstacle
-                float dx = x - obs.x;
-                float dy = y - obs.y;
-                float dist_to_center = std::sqrt(dx*dx + dy*dy);
-                float signed_distance = dist_to_center - obs.radius - node.radius;
-                
-                // Hinge loss function with cut-off epsilon_sdf
-                float hinge_loss = std::max(0.0f, epsilon_sdf_ - signed_distance);
-                
-                // Weighted squared hinge loss
-                total_cost += sigma_obs_ * hinge_loss * hinge_loss;
-            }
-        }
-        
-        return total_cost;
+        return traj;
     }
 };
