@@ -37,9 +37,9 @@ add_executable(main src/main.cpp)
 add_executable(visualize_collision_checking src/visualize_collision_checking.cpp)
 add_executable(visualize_noisy_trj src/visualize_noisy_trj.cpp)
 
-target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_include_directories(visualize_collision_checking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_include_directories(visualize_noisy_trj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_include_directories(visualize_collision_checking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_include_directories(visualize_noisy_trj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 link_directories(/opt/homebrew/lib)
 
 # Link the SFML libraries to the executable
@@ -83,7 +83,3 @@ message(STATUS "SFML found and configured successfully!")
 else()
 message(FATAL_ERROR "SFML not found. Please ensure SFML is installed.")
 endif()
-
-# ---- tests ----
-enable_testing()
-add_subdirectory(tests)

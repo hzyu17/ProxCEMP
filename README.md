@@ -102,3 +102,20 @@ Controls:
 Use mouse buttons to rotate (left), pan (right), or zoom (middle/scroll).
 Close the window to exit.
 
+## MoveIt ROS benchmarking
+Build the Docker image:
+```
+cd Dockers/ROS1MoveIt && \
+docker build -t moveit-stomp:noetic .
+```
+
+Run the new container:
+```
+docker run -it --name moveit_stomp moveit-stomp:noetic
+```
+
+Inside the docker image, run:
+```
+source /root/catkin_ws/devel/setup.bash
+roslaunch moveit_resources_panda_moveit_config demo.launch pipeline:=stomp
+```

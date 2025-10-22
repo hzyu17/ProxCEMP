@@ -13,11 +13,23 @@ int main() {
     int numInitialNodes = 100;
     float initialTotalTime = 8.0f;
     float nodeCollisionRadius = 15.0f;
+    unsigned int randomSeed = std::random_device{}();  // Default: random seed
     YAML::Node config;
 
     // Read values from config.yaml
     try {
         config = YAML::LoadFile("../configs/config.yaml");
+
+        if (config["experiment"]) {
+            const YAML::Node& experimentConfig = config["experiment"];
+            // Read random seed from config
+            if (experimentConfig["random_seed"]) {
+                randomSeed = experimentConfig["random_seed"].as<unsigned int>();
+                std::cout << "Using seed from config: " << randomSeed << "\n";
+            } else {
+                std::cout << "No seed in config. Using random seed: " << randomSeed << "\n";
+            }
+        }
 
         if (config["motion_planning"]) {
             const YAML::Node& plannerConfig = config["motion_planning"];
@@ -40,11 +52,15 @@ int main() {
     std::cout << "Visualization parameters:\n"
               << "  num_discretization: " << numInitialNodes << "\n"
               << "  total_time: " << initialTotalTime << "\n"
-              << "  node_collision_radius: " << nodeCollisionRadius << "\n";
+              << "  node_collision_radius: " << nodeCollisionRadius << "\n"
+              << "  random_seed: " << randomSeed << "\n";
 
-    // --- 2. Create Obstacle Map ---
+    // --- 2. Create Obstacle Map with Seed ---
     ObstacleMap obstacle_map(2);  // 2D obstacle map
     obstacle_map.setMapSize(MAP_WIDTH, MAP_HEIGHT);
+    
+    // Set the seed before generating obstacles
+    obstacle_map.setSeed(randomSeed);
     obstacle_map.generateRandom2D(NUM_OBSTACLES, OBSTACLE_RADIUS);
     
     std::cout << "Generated " << obstacle_map.size() << " obstacles\n";
@@ -118,8 +134,9 @@ int main() {
                 if (key_event->code == sf::Keyboard::Key::R) {
                     std::cout << "\n--- Resetting ---\n";
                     
-                    // Regenerate obstacles
+                    // Regenerate obstacles with the same seed
                     obstacle_map.clear();
+                    obstacle_map.setSeed(randomSeed);
                     obstacle_map.generateRandom2D(NUM_OBSTACLES, OBSTACLE_RADIUS);
                     std::cout << "Regenerated " << obstacle_map.size() << " obstacles\n";
                     
@@ -156,6 +173,8 @@ int main() {
         
         window.display();
     }
+
+    obstacle_map.saveToJSON("obstacle_map_seed_999.json");
 
     return 0;
 }

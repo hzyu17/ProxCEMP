@@ -55,6 +55,9 @@ int main() {
     std::cout << "\n--- Showing Final Results ---\n";
     showPlannerWindow(planner_pce, "PCEM Results");
     showPlannerWindow(planner_ngd, "NGD Results");
+
+    savePlannerToFile(planner_pce, "pcem_final.png");
+    savePlannerToFile(planner_ngd, "ngd_final.png");
     
     return 0;
 }
