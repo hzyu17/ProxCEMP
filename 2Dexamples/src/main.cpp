@@ -5,6 +5,7 @@
 #include "visualization.h"
 #include "visualization_base.h"
 #include <filesystem>
+#include "TrajectoryComparison.h"
 
 int main() {
     std::cout << "=================================================\n";

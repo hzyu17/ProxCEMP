@@ -258,6 +258,14 @@ public:
         return "NGD";
     }
 
+    const std::vector<ObstacleND>& getObstacles() const override {
+        return obstacles_;
+    }
+
+    const Eigen::SparseMatrix<float>& getRMatrix() const {
+        return R_matrix_;
+    }
+
 
     /**
      * @brief Runs the NGD optimization loop using Task interface
@@ -337,18 +345,12 @@ public:
             }
             natural_gradient /= M;
             
-            Eigen::MatrixXf Y_new = (1.0f - learning_rate_) * Y_k - learning_rate_ * natural_gradient;
+            // Eigen::MatrixXf Y_new = (1.0f - learning_rate_) * Y_k - learning_rate_ * natural_gradient;
+            Eigen::MatrixXf Y_new = Y_k - learning_rate_ * natural_gradient;
             updateTrajectoryFromMatrix(Y_new);
 
-            // Fix start and goal
             current_trajectory_.nodes[0].position = start_node_.position;
             current_trajectory_.nodes[N - 1].position = goal_node_.position;
-
-            // Apply task filtering if available
-            bool filtered = task_->filterTrajectory(current_trajectory_, iteration);
-            if (filtered) {
-                log("  Trajectory filtered by task");
-            }
 
             storeTrajectory();
             
