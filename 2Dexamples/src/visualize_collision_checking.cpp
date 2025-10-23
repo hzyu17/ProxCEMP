@@ -61,7 +61,7 @@ int main() {
     
     // Set the seed before generating obstacles
     obstacle_map.setSeed(randomSeed);
-    obstacle_map.generateRandom2D(NUM_OBSTACLES, OBSTACLE_RADIUS);
+    obstacle_map.generateRandom(NUM_OBSTACLES, OBSTACLE_RADIUS);
     
     std::cout << "Generated " << obstacle_map.size() << " obstacles\n";
 
@@ -137,7 +137,7 @@ int main() {
                     // Regenerate obstacles with the same seed
                     obstacle_map.clear();
                     obstacle_map.setSeed(randomSeed);
-                    obstacle_map.generateRandom2D(NUM_OBSTACLES, OBSTACLE_RADIUS);
+                    obstacle_map.generateRandom(NUM_OBSTACLES, OBSTACLE_RADIUS);
                     std::cout << "Regenerated " << obstacle_map.size() << " obstacles\n";
                     
                     // Reinitialize planner

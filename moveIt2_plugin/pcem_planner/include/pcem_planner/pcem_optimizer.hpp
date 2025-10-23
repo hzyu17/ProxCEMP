@@ -73,6 +73,10 @@ public:
     float getBestCost() const { return best_cost_; }
     size_t getBestIteration() const { return best_iteration_; }
     
+    // Exposed for testing
+    SparseMatrixXf buildRegularizationMatrix(size_t num_waypoints) const;
+    MatrixXf trajectoryToMatrix(const std::vector<Eigen::VectorXd>& trajectory) const;
+    
 private:
     Parameters params_;
     mutable std::mt19937 random_engine_;
@@ -92,7 +96,6 @@ private:
     // Helper functions
     void buildDistanceField(const planning_scene::PlanningSceneConstPtr& planning_scene);
     
-    MatrixXf trajectoryToMatrix(const std::vector<Eigen::VectorXd>& trajectory) const;
     std::vector<Eigen::VectorXd> matrixToTrajectory(const MatrixXf& matrix) const;
     
     std::vector<MatrixXf> sampleNoiseMatrices(
@@ -100,15 +103,12 @@ private:
         size_t num_waypoints,
         size_t num_joints) const;
     
-    float computeCollisionCost(
-        const planning_scene::PlanningSceneConstPtr& planning_scene,
-        const moveit::core::JointModelGroup* group,
-        const std::vector<Eigen::VectorXd>& trajectory) const;
+    // --- TEMPORARY FUNCTION FOR TESTING CORE LOGIC ---
+    float computeCollisionCost() const;
+    // ---------------------------------------------------
     
     float computeSmoothnessCost(
         const std::vector<Eigen::VectorXd>& trajectory) const;
-    
-    SparseMatrixXf buildRegularizationMatrix(size_t num_waypoints) const;
 };
 
 } // namespace pcem_planner

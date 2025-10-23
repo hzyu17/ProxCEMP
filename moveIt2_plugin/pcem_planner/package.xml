@@ -1,23 +1,24 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<package format="3">
-  <name>moveit_planners_pcem</name>
-  <version>2.10.0</version>
-  <description>PCEM trajectory optimizer using MoveIt distance fields</description>
-  <maintainer email="you@example.com">Your Name</maintainer>
-  <license>BSD-3-Clause</license>
+<package format="2">
+  <name>pce_motion_planner_tests</name>
+  <version>1.0.0</version>
+  <description>Tests for Proximal Cross-Entropy Motion Planner with MoveIt Integration (ROS 1 Noetic)</description>
+  <maintainer email="your.email@example.com">Your Name</maintainer>
+  <license>MIT</license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>catkin</buildtool_depend>
 
+  <depend>roscpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>moveit_msgs</depend>
   <depend>moveit_core</depend>
   <depend>moveit_ros_planning</depend>
-  <depend>pluginlib</depend>
-  <depend>rclcpp</depend>
-  <depend>eigen3_cmake_module</depend>
-  <depend>Eigen3</depend>
+  <depend>eigen</depend>
+  <depend>pce_motion_planner</depend>
 
-  <export>
-    <build_type>ament_cmake</build_type>
-    <moveit_core plugin="${prefix}/pcem_planner_plugin_description.xml"/>
-  </export>
+  <test_depend>gtest</test_depend>
+  <test_depend>rostest</test_depend>
+
 </package>

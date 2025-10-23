@@ -1,6 +1,6 @@
 #include "PCEMotionPlanner.h"
 #include "NGDMotionPlanner.h"
-#include "visualization.h"  // Only include in main, not in MotionPlanner.h
+#include "visualization.h"
 #include "visualization_base.h"
 #include <filesystem>
 

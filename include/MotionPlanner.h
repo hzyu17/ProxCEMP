@@ -4,7 +4,6 @@
 #include "ObstacleMap.h"
 #include "ForwardKinematics.h"
 #include "collision_utils.h"
-// #include "visualization_base.h"
 #include <vector> 
 #include <random> 
 #include <iostream>
@@ -14,11 +13,12 @@
 #include <memory>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
-#include <fstream>      // ✓ Add this
-#include <sstream>      // ✓ Add this
-#include <iomanip>      // ✓ Add this
+#include <fstream>      
+#include <sstream>      
+#include <iomanip>      
 #include <chrono>
 #include <yaml-cpp/yaml.h>
+#include <filesystem>
 
 /**
  * @brief Enumerates the available interpolation methods for initial path generation.
@@ -58,8 +58,6 @@ public:
     MotionPlanner() {
         std::random_device rd;
         random_engine_.seed(rd());
-        // Default: identity FK for 2D Cartesian planning
-        fk_ = std::make_shared<IdentityFK>(2);
     }
     
     virtual ~MotionPlanner() {
@@ -137,13 +135,33 @@ public:
      * @param obstacles Reference to the obstacles vector (obstacles near start/goal will be removed).
      * @param clearance_radius The radius around start and goal within which obstacles are removed.
      */
-    virtual void initialize(const PathNode& start, 
+
+    virtual void initialize(const size_t num_dims,
+                            const PathNode& start, 
                             const PathNode& goal, 
                             size_t num_nodes, 
                             float total_time, 
                             InterpolationMethod method, 
                             ObstacleMap& obstacle_map,
                             float clearance_dist) {
+
+        std::cout << "\n========== DEBUG initialize() ==========\n";
+        std::cout << "Input parameters:\n";
+        std::cout << "  num_dims: " << num_dims << "\n";
+        std::cout << "  start.position.size(): " << start.position.size() << "\n";
+        std::cout << "  goal.position.size(): " << goal.position.size() << "\n";
+        std::cout << "  start.position: [";
+        for (int i = 0; i < start.position.size(); ++i) {
+            std::cout << start.position(i);
+            if (i < start.position.size() - 1) std::cout << ", ";
+        }
+        std::cout << "]\n";
+        std::cout << "  goal.position: [";
+        for (int i = 0; i < goal.position.size(); ++i) {
+            std::cout << goal.position(i);
+            if (i < goal.position.size() - 1) std::cout << ", ";
+        }
+        std::cout << "]\n";
         
         if (num_nodes < 2) {
             throw std::invalid_argument("num_nodes must be >= 2");
@@ -158,6 +176,10 @@ public:
         num_nodes_ = num_nodes;
         start_node_ = start;
         goal_node_ = goal;
+        num_dimensions_ = num_dims;
+
+        // Update FK to match num_dimensions_
+        fk_ = std::make_shared<IdentityFK>(num_dimensions_);
 
         // Clear obstacles near start/goal
         obstacle_map.clearStartGoalRegions(start.position, goal.position, clearance_dist);
@@ -212,6 +234,42 @@ public:
             }
             
             R_matrix_.setFromTriplets(triplets.begin(), triplets.end());
+
+            float epsilon = 1e-4f * scale;  // Small regularization relative to scale
+            for (size_t i = 0; i < num_nodes; ++i) {
+                R_matrix_.coeffRef(i, i) += epsilon;
+            }
+
+            std::cout << "\n=== Verifying R Matrix ===\n";
+            std::cout << "R size: " << R_matrix_.rows() << "x" << R_matrix_.cols() << "\n";
+            std::cout << "R nonzeros: " << R_matrix_.nonZeros() << "\n";
+            std::cout << "scale = " << scale << "\n";
+
+            // Print structure for small matrices
+            if (num_nodes <= 10) {
+                Eigen::MatrixXf R_dense = Eigen::MatrixXf(R_matrix_);
+                std::cout << "R matrix:\n" << R_dense << "\n";
+            }
+
+            // Check eigenvalues (convert to dense for small matrices)
+            if (num_nodes <= 200) {
+                Eigen::MatrixXf R_dense = Eigen::MatrixXf(R_matrix_);
+                Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> es(R_dense);
+                
+                float min_eig = es.eigenvalues().minCoeff();
+                float max_eig = es.eigenvalues().maxCoeff();
+                
+                std::cout << "Eigenvalues: min = " << min_eig << ", max = " << max_eig << "\n";
+                
+                if (min_eig < -1e-6) {
+                    std::cerr << "ERROR: R matrix has negative eigenvalues! Not PSD!\n";
+                    std::cerr << "Smallest eigenvalues: " << es.eigenvalues().head(5).transpose() << "\n";
+                } else {
+                    std::cout << "✓ R matrix is positive semi-definite\n";
+                }
+            }
+            std::cout << "=========================\n\n";
+
             R_matrix_.makeCompressed();
         }
 
@@ -311,7 +369,7 @@ public:
     /**
      * @brief N-dimensional collision cost using Squared Hinge Loss.
      */
-    float computeCollisionCost(const Trajectory& traj, const std::vector<ObstacleND>& obstacles) const {
+    virtual float computeCollisionCost(const Trajectory& traj, const std::vector<ObstacleND>& obstacles) const {
         float total_cost = 0.0f;
 
         for (const auto& node : traj.nodes) {
@@ -361,6 +419,7 @@ public:
         
         // Extract all trajectory positions into a D x N matrix
         Eigen::MatrixXf Y(D, N);
+
         for (size_t i = 0; i < N; ++i) {
             Y.col(i) = traj.nodes[i].position;
         }
@@ -370,10 +429,43 @@ public:
         for (size_t d = 0; d < D; ++d) {
             Eigen::VectorXf Y_d = Y.row(d).transpose();  // Extract dimension d (N x 1 vector)
             
+            // ✅ Debug: Check Y_d
+            float y_min = Y_d.minCoeff();
+            float y_max = Y_d.maxCoeff();
+            float y_mean = Y_d.mean();
+            
             // Compute quadratic form: Y_d^T * R * Y_d
-            // R_matrix_ already includes the 1/dt^4 scaling factor
             Eigen::VectorXf RY_d = R_matrix_ * Y_d;
             float cost_d = Y_d.dot(RY_d);
+            
+            // ✅ Debug output if negative
+            if (cost_d < 0) {
+                std::cerr << "\n=== NEGATIVE SMOOTHNESS COST ===" << "\n";
+                std::cerr << "Dimension: " << d << "\n";
+                std::cerr << "Cost: " << cost_d << "\n";
+                std::cerr << "Y_d range: [" << y_min << ", " << y_max << "]\n";
+                std::cerr << "Y_d mean: " << y_mean << "\n";
+                std::cerr << "Y_d norm: " << Y_d.norm() << "\n";
+                std::cerr << "RY_d norm: " << RY_d.norm() << "\n";
+                
+                // Check if R is symmetric
+                std::cerr << "R_matrix size: " << R_matrix_.rows() << "x" << R_matrix_.cols() << "\n";
+                std::cerr << "R_matrix nonzeros: " << R_matrix_.nonZeros() << "\n";
+                
+                // Print first few values
+                std::cerr << "First 5 Y_d values: ";
+                for (int i = 0; i < std::min(5, (int)Y_d.size()); ++i) {
+                    std::cerr << Y_d(i) << " ";
+                }
+                std::cerr << "\n";
+                
+                // Check symmetry by sampling
+                float r_01 = R_matrix_.coeff(0, 1);
+                float r_10 = R_matrix_.coeff(1, 0);
+                std::cerr << "R(0,1) = " << r_01 << ", R(1,0) = " << r_10 << "\n";
+                
+                std::cerr << "================================\n\n";
+            }
             
             total_cost += cost_d;
         }
@@ -452,11 +544,6 @@ public:
      */
     void setInitialTrajectory(const Trajectory& trajectory) {
         current_trajectory_ = trajectory;
-        
-        // Validate dimensionality
-        if (!trajectory.nodes.empty()) {
-            num_dimensions_ = trajectory.dimensions();
-        }
     }
 
     /**
@@ -469,8 +556,16 @@ public:
         
         Eigen::MatrixXf Y(D, N);
         for (size_t i = 0; i < N; ++i) {
-            Y.col(i) = current_trajectory_.nodes[i].position;
+            if (current_trajectory_.nodes[i].position.size() != D) {
+                throw std::runtime_error(
+                    "Node " + std::to_string(i) + " has dimension " + 
+                    std::to_string(current_trajectory_.nodes[i].position.size()) +
+                    " but expected " + std::to_string(D)
+                );
+            }
+            Y.col(i) = Eigen::MatrixXf(current_trajectory_.nodes[i].position);
         }
+
         return Y;
     }
 
@@ -486,7 +581,27 @@ public:
         const size_t D = Y.rows();
         
         for (size_t i = 0; i < N; ++i) {
-            traj.nodes[i].position = Y.col(i);
+            traj.nodes[i].position = Eigen::VectorXf(Y.col(i));
+        }
+        
+        return traj;
+    }
+
+    Trajectory matrixToTrajectory(const MatrixXf& positions, const Trajectory& reference) const {
+        Trajectory traj;
+        traj.total_time = reference.total_time;
+        traj.start_index = reference.start_index;
+        traj.goal_index = reference.goal_index;
+        
+        const size_t N = positions.cols();
+        traj.nodes.reserve(N);
+        
+        for (size_t i = 0; i < N; ++i) {
+            Eigen::VectorXf position = Eigen::VectorXf(positions.col(i));
+            
+            float radius = (i < reference.nodes.size()) ? reference.nodes[i].radius : 0.5f;
+            PathNode node(position, radius);
+            traj.nodes.push_back(node);
         }
         
         return traj;
@@ -519,9 +634,6 @@ public:
      */
     void setForwardKinematics(std::shared_ptr<ForwardKinematics> fk) {
         fk_ = fk;
-        if (fk_) {
-            num_dimensions_ = fk_->getConfigDimension();
-        }
     }
 
 
@@ -692,7 +804,7 @@ protected:
     Trajectory current_trajectory_;
     PathNode start_node_;
     PathNode goal_node_;
-    size_t num_dimensions_ = 2;  // Dimensionality of configuration space
+    size_t num_dimensions_;  // Dimensionality of configuration space
 
     // configuration parameters
     YAML::Node config_;
@@ -728,6 +840,14 @@ protected:
             config_ = YAML::LoadFile(config_file_path);
             
             std::cout << "Configuration loaded from: " << config_file_path << "\n";
+
+            if (config_["motion_planning"] && config_["motion_planning"]["num_dimensions"]) {
+                num_dimensions_ = config_["motion_planning"]["num_dimensions"].as<size_t>();
+                std::cout << "State dimensions: " << num_dimensions_ << "D\n";
+            } else {
+                std::cerr << "Error: num_dimensions not found in config\n";
+                return false;
+            }
             
             // Read random seed
             if (config_["experiment"] && config_["experiment"]["random_seed"]) {
@@ -750,17 +870,15 @@ protected:
     bool initializeTrajectory() {
         try {
             const YAML::Node& mp = config_["motion_planning"];
-            
-            num_dimensions_ = mp["num_dimensions"].as<size_t>();
             size_t num_nodes = mp["num_discretization"].as<size_t>();
             total_time_ = mp["total_time"].as<float>();
             
             // Initialize with linear interpolation
-            initialize(start_node_, goal_node_, num_nodes, total_time_, 
+            initialize(num_dimensions_, start_node_, goal_node_, num_nodes, total_time_, 
                       InterpolationMethod::LINEAR, *obstacle_map_, 0.0f);
             
-            std::cout << "Trajectory initialized: " << num_nodes << " nodes over " 
-                      << total_time_ << "s\n";
+            std::cout << "Trajectory initialized (" << num_dimensions_ << "D): " 
+                  << num_nodes << " nodes over " << total_time_ << "s\n";
             
             return true;
         } catch (const std::exception& e) {
@@ -858,7 +976,7 @@ protected:
         const size_t N = Y_new.cols();
         
         for (size_t i = 0; i < N; ++i) {
-            current_trajectory_.nodes[i].position = Y_new.col(i);
+            current_trajectory_.nodes[i].position = Eigen::VectorXf(Y_new.col(i));
         }
         
         // Enforce start/goal constraints
@@ -941,29 +1059,73 @@ protected:
             
             float map_width = env["map_width"].as<float>();
             float map_height = env["map_height"].as<float>();
+            float map_depth = (num_dimensions_ >= 3 && env["map_depth"]) ? 
+                          env["map_depth"].as<float>() : 0.0f;
             size_t num_obstacles = env["num_obstacles"].as<size_t>();
             float obstacle_radius = env["obstacle_radius"].as<float>();
             float clearance_dist = env["clearance_distance"].as<float>();
             
             // Create obstacle map
-            obstacle_map_ = std::make_unique<ObstacleMap>(2, random_seed_);
-            obstacle_map_->setMapSize(map_width, map_height);
-            obstacle_map_->generateRandom2D(num_obstacles, obstacle_radius);
+            obstacle_map_ = std::make_unique<ObstacleMap>(num_dimensions_, random_seed_);
+            if (num_dimensions_ == 2) {
+                obstacle_map_->setMapSize(map_width, map_height);
+            } else if (num_dimensions_ == 3) {
+                obstacle_map_->setMapSize(map_width, map_height, map_depth);
+            }
+            
+            std::cout << "Creating ObstacleMap with dimensions: " << num_dimensions_ << "\n";
+            obstacle_map_->generateRandom(num_obstacles, obstacle_radius);
             
             num_obstacles_initial_ = obstacle_map_->size();
-            
+            std::cout << "Generated " << num_obstacles_initial_ << " obstacles\n";
+
             // Read start/goal from config
             auto start_vec = env["start_position"].as<std::vector<float>>();
             auto goal_vec = env["goal_position"].as<std::vector<float>>();
+
+            std::cout << "start_vec.size(): " << start_vec.size() << "\n";
+            std::cout << "goal_vec.size(): " << goal_vec.size() << "\n";
+            std::cout << "num_dimensions_: " << num_dimensions_ << "\n";
             
             float node_radius = config_["motion_planning"]["node_collision_radius"].as<float>();
             
-            start_node_ = PathNode(start_vec[0], start_vec[1], node_radius);
-            goal_node_ = PathNode(goal_vec[0], goal_vec[1], node_radius);
+            if (num_dimensions_ == 2){
+                start_node_ = PathNode(start_vec[0], start_vec[1], node_radius);
+                goal_node_ = PathNode(goal_vec[0], goal_vec[1], node_radius);
+            } else if (num_dimensions_ == 3) {
+                start_node_ = PathNode(start_vec[0], start_vec[1], start_vec[2], node_radius);
+                goal_node_ = PathNode(goal_vec[0], goal_vec[1], goal_vec[2], node_radius);
+            } else {
+                throw std::runtime_error("Invalid number of dimensions");
+            }
+
+            std::cout << "After PathNode creation:\n";
+            std::cout << "  start_node_.position.size(): " << start_node_.position.size() << "\n";
+            std::cout << "  goal_node_.position.size(): " << goal_node_.position.size() << "\n";
+            
+            // Update FK
+            fk_ = std::make_shared<IdentityFK>(num_dimensions_);
+
+            // Validate
+            if (start_vec.size() != num_dimensions_) {
+                std::cerr << "ERROR: start_vec.size() != num_dimensions_\n";
+                return false;
+            }
+            
+            if (goal_vec.size() != num_dimensions_) {
+                std::cerr << "ERROR: goal_vec.size() != num_dimensions_\n";
+                return false;
+            }
+
+            std::cout << "About to call clearStartGoalRegions...\n";
+            std::cout << "  Obstacle map dimensions: " << obstacle_map_->getDimensions() << "\n";
+            std::cout << "  First obstacle dimension: " << (obstacle_map_->getObstacles().empty() ? 0 : obstacle_map_->getObstacles()[0].dimensions()) << "\n";
             
             // Clear obstacles near start/goal
             obstacle_map_->clearStartGoalRegions(start_node_.position, goal_node_.position, clearance_dist);
             
+            std::cout << "clearStartGoalRegions completed successfully\n";
+
             // Store cleared obstacles
             obstacles_ = obstacle_map_->getObstacles();
             

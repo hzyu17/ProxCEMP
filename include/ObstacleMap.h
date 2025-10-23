@@ -14,6 +14,7 @@ using json = nlohmann::json;
 // --- Constants ---
 constexpr int MAP_WIDTH = 800;
 constexpr int MAP_HEIGHT = 600;
+constexpr int MAP_DEPTH = 800;
 constexpr int NUM_OBSTACLES = 20;
 constexpr float OBSTACLE_RADIUS = 20.0f;
 constexpr float TRAJECTORY_RADIUS = 10.0f;
@@ -63,6 +64,7 @@ public:
         : dimensions_(dimensions), 
           map_width_(MAP_WIDTH), 
           map_height_(MAP_HEIGHT),
+          map_depth_(MAP_DEPTH),
           gen_(seed)  // ✓ Initialize with seed
     {
         std::cout << "ObstacleMap initialized with seed: " << seed << "\n";
@@ -106,6 +108,7 @@ public:
                 {"dimensions", dimensions_},
                 {"map_width", map_width_},
                 {"map_height", map_height_},
+                {"map_depth", map_depth_},
                 {"num_obstacles", obstacles_.size()}
             };
             
@@ -173,6 +176,11 @@ public:
                 dimensions_ = j["metadata"]["dimensions"].get<size_t>();
                 map_width_ = j["metadata"]["map_width"].get<float>();
                 map_height_ = j["metadata"]["map_height"].get<float>();
+                
+                if (j["metadata"].contains("map_depth")) {
+                    map_depth_ = j["metadata"]["map_depth"].get<float>();
+                }
+                
             }
             
             // Load obstacles
@@ -220,6 +228,17 @@ public:
             obstacles_.emplace_back(x, y, radius);
         } else {
             std::cerr << "Warning: Cannot add 2D obstacle to " << dimensions_ << "D map\n";
+        }
+    }
+
+    /**
+     * @brief Adds a 3D obstacle (convenience method)
+     */
+    void addObstacle(float x, float y, float z, float radius) {
+        if (dimensions_ == 3) {
+            obstacles_.emplace_back(x, y, z, radius);
+        } else {
+            std::cerr << "Warning: Cannot add 3D obstacle to " << dimensions_ << "D map\n";
         }
     }
     
@@ -282,68 +301,43 @@ public:
         obstacles_.clear();
     }
     
-    // --- Obstacle Generation ---
-    
     /**
-     * @brief Generates random 2D obstacles with minimum spacing
+     * @brief Generates random obstacles with minimum spacing (works for 2D, 3D, or N-D)
      */
-    void generateRandom2D(size_t count, float radius, 
-                         float min_spacing_factor = 2.0f) {
-        if (dimensions_ != 2) {
-            std::cerr << "Error: generateRandom2D only works for 2D maps\n";
-            return;
+    void generateRandom(size_t count, float radius, float min_spacing_factor = 2.0f) {
+        Eigen::VectorXf min_bounds(dimensions_);
+        Eigen::VectorXf max_bounds(dimensions_);
+        
+        // Set bounds based on dimensions
+        min_bounds(0) = OBSTACLE_RADIUS;
+        max_bounds(0) = map_width_ - OBSTACLE_RADIUS;
+        
+        if (dimensions_ >= 2) {
+            min_bounds(1) = OBSTACLE_RADIUS;
+            max_bounds(1) = map_height_ - OBSTACLE_RADIUS;
         }
         
-        const float min_spacing = radius * min_spacing_factor;
-        const float min_spacing_sq = min_spacing * min_spacing;
-        
-        std::uniform_real_distribution<float> distrib_x(
-            radius + OBSTACLE_RADIUS, 
-            map_width_ - radius - OBSTACLE_RADIUS
-        );
-        std::uniform_real_distribution<float> distrib_y(
-            radius + OBSTACLE_RADIUS, 
-            map_height_ - radius - OBSTACLE_RADIUS
-        );
-        
-        int attempts = 0;
-        const int MAX_ATTEMPTS = static_cast<int>(count) * 200;
-        
-        while (obstacles_.size() < count && attempts < MAX_ATTEMPTS) {
-            float new_x = distrib_x(gen_);
-            float new_y = distrib_y(gen_);
-            
-            bool overlap = false;
-            for (const auto& obs : obstacles_) {
-                float dx = new_x - obs.x();
-                float dy = new_y - obs.y();
-                if (dx * dx + dy * dy < min_spacing_sq) {
-                    overlap = true;
-                    break;
-                }
-            }
-            
-            if (!overlap) {
-                obstacles_.emplace_back(new_x, new_y, radius);
-            }
-            attempts++;
+        if (dimensions_ >= 3) {
+            min_bounds(2) = OBSTACLE_RADIUS;
+            max_bounds(2) = map_depth_ - OBSTACLE_RADIUS;
         }
         
-        if (obstacles_.size() < count) {
-            std::cout << "Warning: Could only place " << obstacles_.size() 
-                      << " out of " << count << " obstacles\n";
-        } else {
-            std::cout << "Generated " << obstacles_.size() << " obstacles\n";
+        // For dimensions > 3, bounds would need to be set appropriately
+        for (size_t d = 3; d < dimensions_; ++d) {
+            min_bounds(d) = OBSTACLE_RADIUS;
+            max_bounds(d) = 100.0f - OBSTACLE_RADIUS; // Default value, adjust as needed
         }
+        
+        generateRandomND(count, radius, min_bounds, max_bounds, min_spacing_factor);
     }
-    
+
     /**
      * @brief Generates random N-dimensional obstacles with minimum spacing
      */
     void generateRandomND(size_t count, float radius,
-                         const Eigen::VectorXf& min_bounds,
-                         const Eigen::VectorXf& max_bounds,
-                         float min_spacing_factor = 2.0f) {
+                        const Eigen::VectorXf& min_bounds,
+                        const Eigen::VectorXf& max_bounds,
+                        float min_spacing_factor = 2.0f) {
         if (min_bounds.size() != dimensions_ || max_bounds.size() != dimensions_) {
             std::cerr << "Error: Bounds dimension mismatch\n";
             return;
@@ -384,8 +378,13 @@ public:
             attempts++;
         }
         
-        std::cout << "Generated " << obstacles_.size() << " " 
-                  << dimensions_ << "D obstacles\n";
+        if (obstacles_.size() < count) {
+            std::cout << "Warning: Could only place " << obstacles_.size()
+                    << " out of " << count << " obstacles\n";
+        } else {
+            std::cout << "Generated " << obstacles_.size() << " " 
+                    << dimensions_ << "D obstacles\n";
+        }
     }
     
     // --- Distance Queries ---
@@ -458,6 +457,12 @@ public:
         map_width_ = width;
         map_height_ = height;
     }
+
+    void setMapSize(float width, float height, float depth) {
+        map_width_ = width;
+        map_height_ = height;
+        map_depth_ = depth;
+    }
     
     // --- Legacy Support ---
     
@@ -494,6 +499,7 @@ private:
     size_t dimensions_;
     float map_width_;
     float map_height_;
+    float map_depth_;
     std::mt19937 gen_;
 };
 
@@ -523,6 +529,6 @@ inline std::vector<Obstacle> generateObstacles(int count, float radius,
                                               int width, int height) {
     ObstacleMap map(2);
     map.setMapSize(static_cast<float>(width), static_cast<float>(height));
-    map.generateRandom2D(count, radius);
+    map.generateRandom(count, radius);
     return map.toLegacy2D();
 }

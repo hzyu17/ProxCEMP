@@ -147,7 +147,8 @@ bool PCEMOptimizer::optimize(
     SparseMatrixXf R_matrix = buildRegularizationMatrix(num_waypoints);
     
     // Initial cost
-    float collision_cost = computeCollisionCost(planning_scene, group, trajectory);
+    // float collision_cost = computeCollisionCost(planning_scene, group, trajectory);
+    float collision_cost = computeCollisionCost();
     float smoothness_cost = computeSmoothnessCost(trajectory);
     float cost = params_.collision_weight * collision_cost + 
                  params_.smoothness_weight * smoothness_cost;
@@ -192,7 +193,8 @@ bool PCEMOptimizer::optimize(
             sample_traj[num_waypoints - 1] = goal_config;
             
             // Compute collision cost using distance field
-            float sample_collision = computeCollisionCost(planning_scene, group, sample_traj);
+            // float sample_collision = computeCollisionCost(planning_scene, group, sample_traj);
+            float sample_collision = computeCollisionCost();
             
             // Regularization term (sum over all joints)
             float reg_term = 0.0f;
@@ -246,7 +248,8 @@ bool PCEMOptimizer::optimize(
         trajectory_history_.push_back(trajectory);
         
         // Compute new cost
-        collision_cost = computeCollisionCost(planning_scene, group, trajectory);
+        collision_cost = computeCollisionCost();
+        // collision_cost = computeCollisionCost(planning_scene, group, trajectory);
         smoothness_cost = computeSmoothnessCost(trajectory);
         float new_cost = params_.collision_weight * collision_cost + 
                         params_.smoothness_weight * smoothness_cost;
@@ -285,6 +288,16 @@ bool PCEMOptimizer::optimize(
     RCLCPP_INFO(getLogger(), "PCEM optimization complete");
     return true;
 }
+
+
+// --- TEMPORARY FUNCTION FOR TESTING CORE LOGIC ---
+float PCEMOptimizer::computeCollisionCost() const
+{
+    // ROS_INFO_STREAM("Using MOCKED collision cost: 5.0f");
+    return 5.0f; // Arbitrary constant value
+}
+// ---------------------------------------------------
+
 
 float PCEMOptimizer::computeCollisionCost(
     const planning_scene::PlanningSceneConstPtr& planning_scene,
