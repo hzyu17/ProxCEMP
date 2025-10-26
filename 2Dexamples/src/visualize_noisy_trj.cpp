@@ -4,10 +4,8 @@
 #include <yaml-cpp/yaml.h>
 #include <filesystem>
 
-#include "../include/ObstacleMap.h"
-#include "../include/Trajectory.h"
-#include "../include/ForwardKinematics.h"
 #include "../include/PCEMotionPlanner.h"
+#include "../include/CollisionAvoidanceTask.h"
 #include "../include/visualization.h"
 
 // --- Visualization Function ---
@@ -78,113 +76,129 @@ int main() {
     std::cout << "  (Smoothness Distribution N(0, R^-1))\n";
     std::cout << "========================================\n\n";
 
-    // --- 1. Get Config File Path ---
-    std::filesystem::path source_path(__FILE__);
-    std::filesystem::path source_dir = source_path.parent_path();
-    std::filesystem::path config_path = source_dir / "../configs/config.yaml";
-    std::string config_file = std::filesystem::canonical(config_path).string();
-    
-    std::cout << "Loading config from: " << config_file << "\n\n";
-
-    // --- 2. Read Visualization Parameters ---
+    // --- 1. Load Configuration ---
+    std::string config_file = "../configs/config.yaml";
     YAML::Node config;
-    size_t numSamples = 500;
+    
+    std::cout << "=== Load from YAML ===\n\n";
     
     try {
         config = YAML::LoadFile(config_file);
-        
-        // Optional: add visualization section to config.yaml
-        if (config["visualization"] && config["visualization"]["num_noise_samples"]) {
-            numSamples = config["visualization"]["num_noise_samples"].as<size_t>();
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Warning: Could not read visualization config: " << e.what() << "\n";
-        std::cerr << "Using default: " << numSamples << " samples\n\n";
-    }
-    
-    std::cout << "Visualization: " << numSamples << " noise samples\n\n";
-
-    // --- 3. Initialize Planner ---
-    std::cout << "Initializing planner (no optimization)...\n";
-    ProximalCrossEntropyMotionPlanner planner;
-    
-    // Initialize without running optimization
-    // We'll use a helper method that only does setup
-    if (!planner.initializeOnly(config_file)) {
-        std::cerr << "Failed to initialize planner!\n";
+        std::cout << "Loaded configuration from: " << config_file << "\n";
+    } catch (const YAML::BadFile& e) {
+        std::cerr << "Error: Could not open config file: " << config_file << "\n";
+        return 1;
+    } catch (const YAML::Exception& e) {
+        std::cerr << "Error parsing config file: " << e.what() << "\n";
         return 1;
     }
-    
-    std::cout << "Planner initialized successfully!\n\n";
 
+    // --- 2. Create Task (handles obstacle generation and management) ---
+    std::cout << "\n=== Creating Collision Avoidance Task ===\n";
+    auto task = std::make_shared<pce::CollisionAvoidanceTask>(config);
+
+    // Get obstacle map from task
+    auto obstacle_map = task->getObstacleMap();
+    std::cout << "Task created with " << obstacle_map->size() << " obstacles\n";
+
+    // --- 3. Create and Initialize Planner ---
+    std::cout << "\n=== Creating PCEM Planner ===\n";
+    PCEConfig pce_config;
+    if (!pce_config.loadFromFile(config_file)) {
+        std::cerr << "Failed to load PCE configuration from file\n";
+        return -1;
+    }
+    ProximalCrossEntropyMotionPlanner planner(task);
+    
+    // Initialize planner (loads config and sets up trajectory)
+    std::cout << "\n=== Initializing Planner ===\n";
+    if (!planner.initialize(pce_config)) {
+        std::cerr << "Error: Planner initialization failed\n";
+        return 1;
+    }   
+    
     // Get trajectory and environment
     const Trajectory& config_trajectory = planner.getCurrentTrajectory();
-    const std::vector<ObstacleND>& obstacles = planner.getObstacles();
     const size_t N = config_trajectory.nodes.size();
     const size_t D = config_trajectory.dimensions();
+    
+    // Get obstacles from task
+    std::vector<ObstacleND> obstacles;
+    if (task) {
+        obstacles = task->getObstacles();
+    }
     
     std::cout << "Configuration:\n";
     std::cout << "  Trajectory nodes: " << N << "\n";
     std::cout << "  Dimensions: " << D << "\n";
     std::cout << "  Obstacles: " << obstacles.size() << "\n\n";
 
-    // --- 4. Setup Random Number Generator ---
+    // --- 6. Setup Random Number Generator ---
     std::mt19937 rng;
-    unsigned int seed = 42;
-    if (config["experiment"] && config["experiment"]["random_seed"]) {
-        seed = config["experiment"]["random_seed"].as<unsigned int>();
-    }
+    unsigned int seed = pce_config.random_seed;
     rng.seed(seed);
     std::cout << "Random seed: " << seed << "\n\n";
 
-    // --- 5. Generate Noise Samples ---
-    std::cout << "Generating " << numSamples << " noise samples from N(0, R^-1)...\n";
+    int num_samples = pce_config.num_samples;
+
+    // --- 7. Generate Noise Samples ---
+    std::cout << "Generating " << num_samples << " noise samples from N(0, R^-1)...\n";
     
-    std::vector<Eigen::MatrixXf> epsilon_samples = planner.sampleNoiseMatrices(numSamples, N, D);
+    // Access base class method for sampling noise
+    std::vector<Eigen::MatrixXf> epsilon_samples;
+    
+    // For now, assuming sampleNoiseMatrices is made public or accessible
+    // If it's protected, you'll need to add a public wrapper method in the planner
+    epsilon_samples = planner.sampleNoiseMatrices(num_samples, N, D);
     
     std::cout << "Noise sampling complete!\n\n";
 
-    // --- 6. Create Perturbed Trajectories ---
+    // --- 8. Create Perturbed Trajectories ---
     std::cout << "Creating perturbed trajectories...\n";
     
-    Eigen::MatrixXf Y_base = planner.trajectoryToMatrix();
-    std::vector<Trajectory> config_noisy_samples;
-    config_noisy_samples.reserve(numSamples);
+    // Get base trajectory as matrix
+    Eigen::MatrixXf Y_base(D, N);
+    for (size_t i = 0; i < N; ++i) {
+        Y_base.col(i) = config_trajectory.nodes[i].position;
+    }
     
-    for (size_t m = 0; m < numSamples; ++m) {
-        Trajectory perturbed_traj = planner.createPerturbedTrajectory(Y_base, epsilon_samples[m]);
-        config_noisy_samples.push_back(perturbed_traj);
+    std::vector<Trajectory> config_noisy_samples;
+    config_noisy_samples.reserve(num_samples);
+    
+    for (size_t m = 0; m < num_samples; ++m) {
+        // Create perturbed trajectory
+        Trajectory perturbed_traj = config_trajectory; // Copy base
+        Eigen::MatrixXf Y_perturbed = Y_base + epsilon_samples[m];
         
-        if ((m + 1) % 100 == 0) {
-            std::cout << "  Created " << (m + 1) << "/" << numSamples << " trajectories\n";
+        // Update positions
+        for (size_t i = 0; i < N; ++i) {
+            perturbed_traj.nodes[i].position = Y_perturbed.col(i);
         }
+        
+        config_noisy_samples.push_back(perturbed_traj);
     }
     
     std::cout << "Perturbed trajectories created!\n\n";
 
-    // --- 7. Apply Forward Kinematics (Config → Workspace) ---
+    // --- 9. Apply Forward Kinematics (Config → Workspace) ---
     std::cout << "Applying forward kinematics to workspace...\n";
     
     auto fk = planner.getForwardKinematics();
     Trajectory workspace_base = fk->apply(config_trajectory);
     
     std::vector<Trajectory> workspace_noisy_samples;
-    workspace_noisy_samples.reserve(numSamples);
+    workspace_noisy_samples.reserve(num_samples);
     
-    for (size_t m = 0; m < numSamples; ++m) {
+    for (size_t m = 0; m < num_samples; ++m) {
         workspace_noisy_samples.push_back(fk->apply(config_noisy_samples[m]));
-        
-        if ((m + 1) % 100 == 0) {
-            std::cout << "  Transformed " << (m + 1) << "/" << numSamples << " samples\n";
-        }
     }
     std::cout << "Workspace transformation complete!\n\n";
 
-    // --- 8. Compute Noise Statistics ---
+    // --- 10. Compute Noise Statistics ---
     float total_perturbation = 0.0f;
     float max_perturbation = 0.0f;
     
-    for (size_t m = 0; m < numSamples; ++m) {
+    for (size_t m = 0; m < num_samples; ++m) {
         for (size_t i = 0; i < N; ++i) {
             Eigen::VectorXf diff = workspace_noisy_samples[m].nodes[i].position 
                                   - workspace_base.nodes[i].position;
@@ -195,12 +209,12 @@ int main() {
         }
     }
     
-    float avg_perturbation = total_perturbation / (numSamples * N);
+    float avg_perturbation = total_perturbation / (num_samples * N);
     
     std::cout << "=== Noise Statistics (Workspace) ===\n";
     std::cout << "  Average perturbation: " << avg_perturbation << " units\n";
     std::cout << "  Maximum perturbation: " << max_perturbation << " units\n";
-    std::cout << "  Total samples: " << numSamples << "\n";
+    std::cout << "  Total samples: " << num_samples << "\n";
     std::cout << "  Nodes per trajectory: " << N << "\n\n";
     
     std::cout << "Visualization Legend:\n";
@@ -212,7 +226,7 @@ int main() {
     
     std::cout << "Opening visualization window...\n";
 
-    // --- 9. Visualize ---
+    // --- 11. Visualize ---
     visualizeNoise(obstacles, workspace_base, workspace_noisy_samples);
 
     std::cout << "\nVisualization closed. Exiting.\n";

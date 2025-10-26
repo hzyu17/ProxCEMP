@@ -78,7 +78,7 @@ target_link_libraries(visualize_collision_checking PRIVATE
     ${PLATFORM_LIBS}
 )
 
-# Link libraries for 'visualize_noisy_trj'
+# # Link libraries for 'visualize_noisy_trj'
 target_link_libraries(visualize_noisy_trj PRIVATE
     SFML::System
     SFML::Window
@@ -97,6 +97,7 @@ set_target_properties(visualize_collision_checking PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
 )
+
 set_target_properties(visualize_noisy_trj PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON

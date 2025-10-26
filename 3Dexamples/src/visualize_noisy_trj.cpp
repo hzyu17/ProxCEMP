@@ -10,6 +10,7 @@
 #include "../include/ForwardKinematics.h"
 #include "../include/PCEMotionPlanner.h"
 #include "../include/visualization3d.h"
+#include <string>
 
 /**
  * @brief Visualizes smoothness noise distribution N(0, R^-1) in 3D workspace
@@ -260,7 +261,6 @@ int main() {
     planner.initialize(numDimensions, startNode, goalNode, numNodes, totalTime,
                       InterpolationMethod::LINEAR, obstacle_map, clearanceDist);
     
-    std::cout << "Planner initialized successfully!\n";
     std::cout << "Obstacles after clearance: " << obstacle_map.size() << "\n\n";
 
     // Get trajectory
@@ -359,5 +359,8 @@ int main() {
     visualizeNoise3D(obstacles, workspace_base, workspace_noisy_samples);
 
     std::cout << "\nVisualization closed. Exiting.\n";
+
+    obstacle_map.saveToJSON("obstacle_map_seed_" + std::to_string(seed) + ".json");
+
     return 0;
 }

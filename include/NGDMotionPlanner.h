@@ -35,7 +35,7 @@ public:
     }
 
     const std::vector<ObstacleND>& getObstacles() const override {
-        return obstacles_;
+        return task_.getObstacles();
     }
 
 

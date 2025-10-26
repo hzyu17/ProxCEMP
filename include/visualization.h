@@ -1,63 +1,132 @@
 #pragma once
 
 #include "visualization_base.h"
-
-// Forward declarations for types assumed to be in MotionPlanner.h
-// These structures must be fully defined where Visualization.h is included.
-class MotionPlanner; 
-
+#include "ObstacleMap.h"
+#include "Trajectory.h"
+#include <vector>
+#include <memory>
+#include <filesystem>
 
 /**
- * @brief Visualizes the optimization history to any SFML RenderTarget (Window or Texture).
- * It relies on the templated functions (drawNode, drawTrajectorySegments, drawObstacles) 
- * from visualization.h, assuming they correctly plot N-D data onto the first 2 dimensions.
+ * @brief Visualizes a trajectory with obstacles to any SFML RenderTarget.
+ * Works directly with ObstacleMap and Trajectory - no MotionPlanner needed!
  */
 template<typename RenderTarget>
-void visualizeOptimizationHistoryToTarget(RenderTarget& target, const MotionPlanner& planner) {
-    
-    target.clear(sf::Color(240, 240, 240)); 
-
-    // 1. Draw obstacles (planner_obstacles_nd is the filtered list)
-    const std::vector<ObstacleND>& obstacles_nd = planner.getObstacles(); 
-    drawObstacles(target, obstacles_nd);
-    
-    const auto& history = planner.getTrajectoryHistory();
-    size_t num_iterations = history.size();
-    
-    if (num_iterations == 0) {
-        // If history is empty, draw the current initial trajectory
-        const Trajectory& current_traj = planner.getCurrentTrajectory();
-        drawTrajectorySegments(target, current_traj, sf::Color(0, 0, 255, 255));
-        num_iterations = 1;
+void visualizeTrajectory(
+    RenderTarget& target,
+    const std::vector<ObstacleND>& obstacles,
+    const Trajectory& trajectory,
+    const sf::Color& trajectory_color = sf::Color(0, 0, 255, 255),
+    bool clear_background = true)
+{
+    if (clear_background) {
+        target.clear(sf::Color(240, 240, 240));
     }
 
-    // 2. Draw historical paths (fading)
-    for (size_t i = 0; i < num_iterations - 1; ++i) {
-        // Calculate alpha based on iteration index
-        float alpha_float = 5.0f + (145.0f * (float)i / std::max(1.0f, (float)num_iterations - 2));
-        unsigned char alpha = static_cast<unsigned char>(alpha_float); 
-        sf::Color history_color(50, 50, 255, alpha); 
-        drawTrajectorySegments(target, history[i], history_color);
-    }
-
-    // 3. Draw the Final Trajectory (bright red)
-    const Trajectory& final_path = history.back();
-    drawTrajectorySegments(target, final_path, sf::Color(255, 0, 0, 255)); 
-
-    // 4. Draw Start/Goal Points
-    if (!final_path.nodes.empty()) {
-        const PathNode& start_node = final_path.nodes[final_path.start_index];
-        const PathNode& goal_node = final_path.nodes[final_path.goal_index];
+    // 1. Draw obstacles
+    drawObstacles(target, obstacles);
+    
+    // 2. Draw trajectory
+    drawTrajectorySegments(target, trajectory, trajectory_color);
+    
+    // 3. Draw start/goal points
+    if (!trajectory.nodes.empty()) {
+        const PathNode& start_node = trajectory.nodes[trajectory.start_index];
+        const PathNode& goal_node = trajectory.nodes[trajectory.goal_index];
         
-        // Use a fixed radius for visibility, otherwise the sphere radius
-        drawNode(target, start_node, 6.0f, sf::Color::Green); 
+        drawNode(target, start_node, 6.0f, sf::Color::Green);
         drawNode(target, goal_node, 6.0f, sf::Color::Red);
     }
 }
 
 
 /**
- * @brief Calculates the signed distance function (SDF) for 2D obstacles (projection).
+ * @brief Overload that takes ObstacleMap directly
+ */
+template<typename RenderTarget>
+void visualizeTrajectory(
+    RenderTarget& target,
+    const ObstacleMap& obstacle_map,
+    const Trajectory& trajectory,
+    const sf::Color& trajectory_color = sf::Color(0, 0, 255, 255),
+    bool clear_background = true)
+{
+    visualizeTrajectory(target, obstacle_map.getObstacles(), trajectory, 
+                       trajectory_color, clear_background);
+}
+
+
+/**
+ * @brief Visualizes multiple trajectories (e.g., optimization history)
+ */
+template<typename RenderTarget>
+void visualizeTrajectoryHistory(
+    RenderTarget& target,
+    const std::vector<ObstacleND>& obstacles,
+    const std::vector<Trajectory>& history,
+    bool fade_older = true,
+    bool clear_background = true)
+{
+    if (clear_background) {
+        target.clear(sf::Color(240, 240, 240));
+    }
+
+    // 1. Draw obstacles
+    drawObstacles(target, obstacles);
+    
+    if (history.empty()) {
+        return;
+    }
+
+    // 2. Draw historical trajectories with fading
+    size_t num_iterations = history.size();
+    
+    for (size_t i = 0; i < num_iterations - 1; ++i) {
+        if (fade_older) {
+            // Calculate alpha based on iteration index (older = more faded)
+            float alpha_float = 5.0f + (145.0f * (float)i / std::max(1.0f, (float)num_iterations - 2));
+            unsigned char alpha = static_cast<unsigned char>(alpha_float);
+            sf::Color history_color(50, 50, 255, alpha);
+            drawTrajectorySegments(target, history[i], history_color);
+        } else {
+            // All history trajectories same color
+            drawTrajectorySegments(target, history[i], sf::Color(50, 50, 255, 100));
+        }
+    }
+
+    // 3. Draw final trajectory (brightest)
+    const Trajectory& final_traj = history.back();
+    drawTrajectorySegments(target, final_traj, sf::Color(255, 0, 0, 255));
+
+    // 4. Draw start/goal points
+    if (!final_traj.nodes.empty()) {
+        const PathNode& start_node = final_traj.nodes[final_traj.start_index];
+        const PathNode& goal_node = final_traj.nodes[final_traj.goal_index];
+        
+        drawNode(target, start_node, 6.0f, sf::Color::Green);
+        drawNode(target, goal_node, 6.0f, sf::Color::Red);
+    }
+}
+
+
+/**
+ * @brief Overload that takes ObstacleMap directly
+ */
+template<typename RenderTarget>
+void visualizeTrajectoryHistory(
+    RenderTarget& target,
+    const ObstacleMap& obstacle_map,
+    const std::vector<Trajectory>& history,
+    bool fade_older = true,
+    bool clear_background = true)
+{
+    visualizeTrajectoryHistory(target, obstacle_map.getObstacles(), history, 
+                              fade_older, clear_background);
+}
+
+
+/**
+ * @brief Calculates the signed distance function (SDF) for 2D obstacles
  */
 inline float calculateSDF2D(float x, float y, const std::vector<ObstacleND>& obstacles) {
     float min_sdf = std::numeric_limits<float>::max();
@@ -78,155 +147,144 @@ inline float calculateSDF2D(float x, float y, const std::vector<ObstacleND>& obs
     return min_sdf;
 }
 
-// --- Visualization Scenes (Templatized for RenderTarget) ---
 
 /**
- * @brief Visualizes the initial trajectory, including the collision checking spheres.
+ * @brief Visualizes trajectory with collision checking spheres
+ * Shows which nodes are in collision (red), near collision (orange), or safe (green)
  */
 template<typename RenderTarget>
-inline void visualizeInitialTrajectoryWithSpheres(RenderTarget& target, const MotionPlanner& planner) {
-    target.clear(sf::Color(240, 240, 240));
+void visualizeTrajectoryWithCollisionSpheres(
+    RenderTarget& target,
+    const std::vector<ObstacleND>& obstacles,
+    const Trajectory& trajectory,
+    float collision_threshold = 10.0f,
+    bool clear_background = true)
+{
+    if (clear_background) {
+        target.clear(sf::Color(240, 240, 240));
+    }
 
-    const std::vector<ObstacleND>& obstacles = planner.getObstacles();
-    drawObstacles(target, obstacles); 
+    // 1. Draw obstacles
+    drawObstacles(target, obstacles);
     
-    const Trajectory& initial_path = planner.getCurrentTrajectory();
-    drawTrajectorySegments(target, initial_path, sf::Color(50, 50, 255, 150)); 
+    // 2. Draw trajectory segments
+    drawTrajectorySegments(target, trajectory, sf::Color(50, 50, 255, 150));
 
-    for (size_t i = 0; i < initial_path.nodes.size(); ++i) {
-        const auto& node = initial_path.nodes[i];
+    // 3. Draw collision spheres for each node
+    for (size_t i = 0; i < trajectory.nodes.size(); ++i) {
+        const auto& node = trajectory.nodes[i];
         
         float node_x = node.position(0);
         float node_y = node.position.size() > 1 ? node.position(1) : 0.0f;
 
+        // Calculate SDF at this node
         float sdf_value = calculateSDF2D(node_x, node_y, obstacles);
         float effective_sdf = sdf_value - node.radius;
 
+        // Color based on collision status
         unsigned char alpha_fill;
         sf::Color node_color;
         
         if (effective_sdf < 0.0f) {
-            node_color = sf::Color(255, 50, 50); 
+            // In collision
+            node_color = sf::Color(255, 50, 50);
             alpha_fill = 255;
-        } else if (effective_sdf < 10.0f) { 
-            node_color = sf::Color(255, 165, 0); 
+        } else if (effective_sdf < collision_threshold) {
+            // Near collision
+            node_color = sf::Color(255, 165, 0);
             alpha_fill = 150;
         } else {
-            node_color = sf::Color(50, 200, 50); 
+            // Safe
+            node_color = sf::Color(50, 200, 50);
             alpha_fill = 80;
         }
         
         sf::Color final_fill_color = node_color;
         final_fill_color.a = alpha_fill;
 
+        // Draw collision sphere
         sf::CircleShape circle(node.radius);
         circle.setFillColor(final_fill_color);
         circle.setOutlineThickness(1.0f);
         circle.setOutlineColor(sf::Color(0, 0, 0, 50));
         circle.setOrigin(sf::Vector2f(node.radius, node.radius));
-        circle.setPosition({node_x, node_y}); 
+        circle.setPosition({node_x, node_y});
         target.draw(circle);
         
-        if (i == initial_path.start_index || i == initial_path.goal_index) {
+        // Draw node center
+        if (i == trajectory.start_index || i == trajectory.goal_index) {
             drawNode(target, node, 5.0f, 
-                    (i == initial_path.start_index) ? sf::Color::Green : sf::Color::Red); 
+                    (i == trajectory.start_index) ? sf::Color::Green : sf::Color::Red);
         } else {
-            drawNode(target, node, 1.5f, sf::Color(0, 0, 0, 200)); 
+            drawNode(target, node, 1.5f, sf::Color(0, 0, 0, 200));
         }
-    }
-    
-    // Only display if the target is a window, not a texture
-    if constexpr (std::is_same_v<RenderTarget, sf::RenderWindow>) {
-        target.display();
     }
 }
 
 
 /**
- * @brief Visualizes optimization progress with trajectory history (fading lines).
+ * @brief Overload that takes ObstacleMap directly
  */
 template<typename RenderTarget>
-inline void visualizeOptimizationProgress(RenderTarget& target, const MotionPlanner& planner) {
-    target.clear(sf::Color(240, 240, 240));
-
-    const std::vector<ObstacleND>& obstacles = planner.getObstacles();
-    drawObstacles(target, obstacles); 
-    
-    const std::vector<Trajectory>& history = planner.getTrajectoryHistory();
-    
-    for (size_t iter = 0; iter < history.size(); ++iter) {
-        float alpha = 50.0f + (200.0f * iter / std::max(1ul, history.size() - 1));
-        sf::Color traj_color(100, 100, 255, static_cast<unsigned char>(alpha));
-        
-        drawTrajectorySegments(target, history[iter], traj_color); 
-    }
-    
-    if (!history.empty()) {
-        const Trajectory& final_traj = history.back();
-        drawTrajectorySegments(target, final_traj, sf::Color(0, 0, 255, 255)); 
-        
-        if (!final_traj.nodes.empty()) {
-            drawNode(target, final_traj.nodes.front(), 8.0f, sf::Color::Green); 
-            drawNode(target, final_traj.nodes.back(), 8.0f, sf::Color::Red);     
-        }
-    }
-    
-    // Only display if the target is a window
-    if constexpr (std::is_same_v<RenderTarget, sf::RenderWindow>) {
-        target.display();
-    }
+void visualizeTrajectoryWithCollisionSpheres(
+    RenderTarget& target,
+    const ObstacleMap& obstacle_map,
+    const Trajectory& trajectory,
+    float collision_threshold = 10.0f,
+    bool clear_background = true)
+{
+    visualizeTrajectoryWithCollisionSpheres(target, obstacle_map.getObstacles(), 
+                                           trajectory, collision_threshold, clear_background);
 }
 
 
 /**
- * @brief Visualizes robot arm configuration with workspace path.
+ * @brief Visualizes just the obstacles (useful for environment visualization)
  */
 template<typename RenderTarget>
-inline void visualizeRobotArmWithFK(RenderTarget& target, 
-                             const MotionPlanner& planner,
-                             const Eigen::Vector2f& base_position = Eigen::Vector2f(400.0f, 400.0f),
-                             float scale = 100.0f) {
-    target.clear(sf::Color(240, 240, 240));
-
-    const std::vector<ObstacleND>& obstacles = planner.getObstacles();
+void visualizeObstacles(
+    RenderTarget& target,
+    const std::vector<ObstacleND>& obstacles,
+    bool clear_background = true)
+{
+    if (clear_background) {
+        target.clear(sf::Color(240, 240, 240));
+    }
+    
     drawObstacles(target, obstacles);
-    
-    const Trajectory& joint_traj = planner.getCurrentTrajectory();
-    
-    // NOTE: This relies on MotionPlanner::applyForwardKinematics 
-    Trajectory workspace_traj = planner.applyForwardKinematics(joint_traj);
-    
-    if (workspace_traj.nodes.size() >= 2) {
-        sf::VertexArray ee_path(sf::PrimitiveType::LineStrip, workspace_traj.nodes.size());
-        for (size_t i = 0; i < workspace_traj.nodes.size(); ++i) {
-            float ee_x = base_position(0) + workspace_traj.nodes[i].position(0) * scale;
-            float ee_y = base_position(1) - workspace_traj.nodes[i].position(1) * scale;
-            ee_path[i].position = sf::Vector2f(ee_x, ee_y);
-            ee_path[i].color = sf::Color(255, 100, 0, 200);
-        }
-        target.draw(ee_path);
-    }
-    
-    sf::CircleShape base(8.0f);
-    base.setFillColor(sf::Color(50, 50, 50, 255));
-    base.setOrigin(sf::Vector2f(8.0f, 8.0f));
-    base.setPosition({base_position[0], base_position[1]});
-    target.draw(base);
-    
-    // Only display if the target is a window
-    if constexpr (std::is_same_v<RenderTarget, sf::RenderWindow>) {
-        target.display();
-    }
 }
 
 
-// --- Utility Functions (Non-Templatized) ---
+/**
+ * @brief Overload that takes ObstacleMap directly
+ */
+template<typename RenderTarget>
+void visualizeObstacles(
+    RenderTarget& target,
+    const ObstacleMap& obstacle_map,
+    bool clear_background = true)
+{
+    visualizeObstacles(target, obstacle_map.getObstacles(), clear_background);
+}
+
+
+// --- File Save Utilities ---
 
 /**
- * @brief Utility function to save the current planner state visualization to a file.
+ * @brief Saves a visualization to a PNG file
+ * @param width Image width
+ * @param height Image height
+ * @param filename Output filename (e.g., "trajectory.png")
+ * @param draw_func Lambda that draws to the render texture
+ * @return true if successful
  */
-inline bool savePlannerToFile(const MotionPlanner& planner, const std::string& filename) {
-    // Determine the path to save the file
+inline bool saveVisualizationToFile(
+    unsigned int width,
+    unsigned int height,
+    const std::string& filename,
+    std::function<void(sf::RenderTexture&)> draw_func)
+{
+    // Determine output path
     std::filesystem::path source_path(__FILE__);
     std::filesystem::path source_dir = source_path.parent_path();
     std::filesystem::path figures_dir = source_dir / "figures";
@@ -242,20 +300,17 @@ inline bool savePlannerToFile(const MotionPlanner& planner, const std::string& f
 
     std::filesystem::path output_path = figures_dir / filename;
 
-    // Use RenderTexture for off-screen rendering
+    // Create render texture
     sf::RenderTexture renderTexture;
-    
-    // FIX: Reverting to resize, as 'create' is not available in your SFML version with these arguments.
-    // The resize method is preferred for default-constructed sf::RenderTexture in newer SFML versions.
-    if (!renderTexture.resize({(unsigned int)MAP_WIDTH, (unsigned int)MAP_HEIGHT})) { 
+    if (!renderTexture.resize({width, height})) {
         std::cerr << "Error: Could not create render texture!" << std::endl;
         return false;
     }
 
     renderTexture.clear(sf::Color(240, 240, 240));
     
-    // Calls the now-templated function with sf::RenderTexture
-    visualizeOptimizationProgress(renderTexture, planner); 
+    // Draw using provided function
+    draw_func(renderTexture);
     
     renderTexture.display();
 
@@ -270,24 +325,203 @@ inline bool savePlannerToFile(const MotionPlanner& planner, const std::string& f
     }
 }
 
+
 /**
- * @brief Opens an SFML window to display the results for a single planner.
+ * @brief Convenience function to save trajectory visualization
  */
-inline void showPlannerWindow(const MotionPlanner& planner, const std::string& title) {
-    sf::RenderWindow window(sf::VideoMode({(unsigned int)MAP_WIDTH, (unsigned int)MAP_HEIGHT}), title, sf::Style::Titlebar | sf::Style::Close);
+inline bool saveTrajectoryToFile(
+    const ObstacleMap& obstacle_map,
+    const Trajectory& trajectory,
+    const std::string& filename,
+    unsigned int width = 800,
+    unsigned int height = 600)
+{
+    return saveVisualizationToFile(width, height, filename,
+        [&](sf::RenderTexture& texture) {
+            visualizeTrajectory(texture, obstacle_map, trajectory);
+        }
+    );
+}
+
+
+/**
+ * @brief Convenience function to save trajectory history visualization
+ */
+inline bool saveTrajectoryHistoryToFile(
+    const ObstacleMap& obstacle_map,
+    const std::vector<Trajectory>& history,
+    const std::string& filename,
+    unsigned int width = 800,
+    unsigned int height = 600)
+{
+    return saveVisualizationToFile(width, height, filename,
+        [&](sf::RenderTexture& texture) {
+            visualizeTrajectoryHistory(texture, obstacle_map, history);
+        }
+    );
+}
+
+
+/**
+ * @brief Convenience function to save trajectory with collision spheres
+ */
+inline bool saveTrajectoryWithCollisionSpheresToFile(
+    const ObstacleMap& obstacle_map,
+    const Trajectory& trajectory,
+    const std::string& filename,
+    unsigned int width = 800,
+    unsigned int height = 600)
+{
+    return saveVisualizationToFile(width, height, filename,
+        [&](sf::RenderTexture& texture) {
+            visualizeTrajectoryWithCollisionSpheres(texture, obstacle_map, trajectory);
+        }
+    );
+}
+
+
+// --- Interactive Window Display ---
+
+/**
+ * @brief Opens an interactive window to display a trajectory
+ */
+inline void showTrajectoryWindow(
+    const ObstacleMap& obstacle_map,
+    const Trajectory& trajectory,
+    const std::string& title = "Trajectory Visualization",
+    unsigned int width = 800,
+    unsigned int height = 600)
+{
+    sf::RenderWindow window(
+        sf::VideoMode({width, height}), 
+        title, 
+        sf::Style::Titlebar | sf::Style::Close
+    );
     window.setFramerateLimit(60);
 
-    // Calls the now-templated function with sf::RenderWindow
-    visualizeInitialTrajectoryWithSpheres(window, planner);
+    // Initial draw
+    visualizeTrajectory(window, obstacle_map, trajectory);
+    window.display();
 
+    // Event loop
     while (window.isOpen()) {
         while (const auto event = window.pollEvent()) {
             if (event->is<sf::Event::Closed>()) {
                 window.close();
             }
         }
-        
-        // Calls the now-templated function with sf::RenderWindow
-        visualizeOptimizationProgress(window, planner); 
     }
 }
+
+
+/**
+ * @brief Opens an interactive window to display trajectory history
+ */
+inline void showTrajectoryHistoryWindow(
+    const ObstacleMap& obstacle_map,
+    const std::vector<Trajectory>& history,
+    const std::string& title = "Optimization History",
+    unsigned int width = 800,
+    unsigned int height = 600)
+{
+    sf::RenderWindow window(
+        sf::VideoMode({width, height}), 
+        title, 
+        sf::Style::Titlebar | sf::Style::Close
+    );
+    window.setFramerateLimit(60);
+
+    // Initial draw
+    visualizeTrajectoryHistory(window, obstacle_map, history);
+    window.display();
+
+    // Event loop
+    while (window.isOpen()) {
+        while (const auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+            }
+        }
+    }
+}
+
+
+/**
+ * @brief Opens an interactive window to display trajectory with collision spheres
+ */
+inline void showTrajectoryWithCollisionSpheresWindow(
+    const ObstacleMap& obstacle_map,
+    const Trajectory& trajectory,
+    const std::string& title = "Collision Visualization",
+    unsigned int width = 800,
+    unsigned int height = 600)
+{
+    sf::RenderWindow window(
+        sf::VideoMode({width, height}), 
+        title, 
+        sf::Style::Titlebar | sf::Style::Close
+    );
+    window.setFramerateLimit(60);
+
+    // Initial draw
+    visualizeTrajectoryWithCollisionSpheres(window, obstacle_map, trajectory);
+    window.display();
+
+    // Event loop
+    while (window.isOpen()) {
+        while (const auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+            }
+        }
+    }
+}
+
+
+// --- Backward Compatibility (for MotionPlanner) ---
+
+// Forward declaration
+class MotionPlanner;
+
+/**
+ * @brief Legacy function for backward compatibility with MotionPlanner
+ * @deprecated Use visualizeTrajectoryHistory with ObstacleMap instead
+ */
+template<typename RenderTarget>
+inline void visualizeOptimizationHistoryToTarget(
+    const std::vector<ObstacleND>& target, 
+    const std::vector<ObstacleND>& obstacles,
+    const std::vector<Trajectory>& history)
+{
+    visualizeTrajectoryHistory(target, obstacles, history, true, true);
+}
+
+
+// /**
+//  * @brief Legacy function for backward compatibility
+//  * @deprecated Use showTrajectoryHistoryWindow with ObstacleMap instead
+//  */
+// inline void showPlannerWindow(
+//     const MotionPlanner& planner, 
+//     const std::string& title)
+// {
+//     const std::vector<ObstacleND>& obstacles = planner.getObstacles();
+//     const auto& history = planner.getTrajectoryHistory();
+    
+//     showTrajectoryHistoryWindow(obstacles, history, title, MAP_WIDTH, MAP_HEIGHT);
+// }
+
+
+// /**
+//  * @brief Legacy function for backward compatibility
+//  * @deprecated Use saveTrajectoryHistoryToFile with ObstacleMap instead
+//  */
+// inline bool savePlannerToFile(
+//     const MotionPlanner& planner, 
+//     const std::string& filename)
+// {
+//     const std::vector<ObstacleND>& obstacles = planner.getObstacles();
+//     const auto& history = planner.getTrajectoryHistory();
+    
+//     return saveTrajectoryHistoryToFile(obstacles, history, filename, MAP_WIDTH, MAP_HEIGHT);
+// }
