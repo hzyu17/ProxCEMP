@@ -13,6 +13,10 @@ environment:
   obstacle_radius: 20.0
   clearance_distance: 100.0
 
+  cost:
+    epsilon_sdf: 10.0
+    sigma_obs: 10.0
+
 motion_planning:
   num_dimensions: 2
   num_discretization: 50
@@ -28,10 +32,6 @@ pce_planner:
   eta: 1.0
   temperature: 1.5
   convergence_threshold: 0.01
-  
-  cost:
-    epsilon_sdf: 10.0
-    sigma_obs: 1.0
 
 ngd_planner:
   num_samples: 3000

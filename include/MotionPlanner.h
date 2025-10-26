@@ -10,7 +10,7 @@
  */
 #pragma once
 
-#include "Trajectory.h"
+#include <pce/Trajectory.h>
 #include "ForwardKinematics.h"
 #include <vector> 
 #include <random> 
@@ -43,10 +43,6 @@ struct MotionPlannerConfig {
     // Experiment parameters
     unsigned int random_seed = 42;
     bool visualize_initial_state = false;
-    
-    // Cost parameters (may be used by task)
-    float epsilon_sdf = 10.0f;
-    float sigma_obs = 1.0f;
     
     // Environment parameters
     float clearance_distance = 2.0f;
@@ -109,18 +105,6 @@ struct MotionPlannerConfig {
                 }
             }
             
-            // Load cost parameters
-            if (config["cost"]) {
-                const YAML::Node& cost = config["cost"];
-                
-                if (cost["epsilon_sdf"]) {
-                    epsilon_sdf = cost["epsilon_sdf"].as<float>();
-                }
-                if (cost["sigma_obs"]) {
-                    sigma_obs = cost["sigma_obs"].as<float>();
-                }
-            }
-            
             // Load environment parameters
             if (config["environment"]) {
                 const YAML::Node& env = config["environment"];
@@ -143,10 +127,6 @@ struct MotionPlannerConfig {
      * @return true if configuration is valid
      */
     virtual bool validate() const {
-        if (num_dimensions < 2 || num_dimensions > 3) {
-            std::cerr << "Error: num_dimensions must be 2 or 3\n";
-            return false;
-        }
         
         if (num_discretization < 2) {
             std::cerr << "Error: num_discretization must be >= 2\n";
@@ -202,10 +182,6 @@ struct MotionPlannerConfig {
         std::cout << "Experiment:\n";
         std::cout << "  Random seed:          " << random_seed << "\n";
         std::cout << "  Visualize initial:    " << (visualize_initial_state ? "true" : "false") << "\n";
-        
-        std::cout << "Cost:\n";
-        std::cout << "  Epsilon SDF:          " << epsilon_sdf << "\n";
-        std::cout << "  Sigma obs:            " << sigma_obs << "\n";
         
         std::cout << "Environment:\n";
         std::cout << "  Clearance distance:   " << clearance_distance << "\n";
@@ -282,18 +258,17 @@ public:
         
         // Print configuration
         std::cout << "Initializing " << getPlannerName() << " planner...\n";
-        config_->print();
         
         // Open log file
         openLog();
-        log("=== Configuration ===");
-        logf("Planner: %s", getPlannerName().c_str());
-        logf("Dimensions: %zu", num_dimensions_);
-        logf("Nodes: %zu", num_nodes_);
-        logf("Total time: %.2f", total_time_);
-        logf("Node radius: %.2f", node_radius_);
-        logf("Random seed: %u", random_seed_);
-        log("");
+        // log("=== Configuration ===");
+        // logf("Planner: %s", getPlannerName().c_str());
+        // logf("Dimensions: %zu", num_dimensions_);
+        // logf("Nodes: %zu", num_nodes_);
+        // logf("Total time: %.2f", total_time_);
+        // logf("Node radius: %.2f", node_radius_);
+        // logf("Random seed: %u", random_seed_);
+        // log("");
         
         // Initialize trajectory
         if (!initializeTrajectory()) {
@@ -302,7 +277,7 @@ public:
         }
         
         // Log planner-specific configuration
-        logPlannerSpecificConfig();
+        // logPlannerSpecificConfig();
         
         is_initialized_ = true;
         
@@ -400,14 +375,14 @@ public:
         return std::numeric_limits<float>::infinity();
     }
 
-    /**
-     * @brief Computes the L2-norm squared smoothness cost for N-dimensional trajectories.
-     * Equivalent to sum over all dimensions: Σ_d (X_d^T A^T A X_d)
-     * @return The total smoothness cost (non-negative).
-     */
-    float computeSmoothnessCost() const {
-        return computeSmoothnessCost(current_trajectory_);
-    }
+    // /**
+    //  * @brief Computes the L2-norm squared smoothness cost for N-dimensional trajectories.
+    //  * Equivalent to sum over all dimensions: Σ_d (X_d^T A^T A X_d)
+    //  * @return The total smoothness cost (non-negative).
+    //  */
+    // float computeSmoothnessCost() const {
+    //     return computeSmoothnessCost(current_trajectory_);
+    // }
 
     float computeSmoothnessCost(const Trajectory& traj) const {
         const size_t N = traj.nodes.size();
@@ -430,7 +405,7 @@ public:
         for (size_t d = 0; d < D; ++d) {
             Eigen::VectorXf Y_d = Y.row(d).transpose();  // Extract dimension d (N x 1 vector)
             
-            // ✅ Debug: Check Y_d
+            // Debug: Check Y_d
             float y_min = Y_d.minCoeff();
             float y_max = Y_d.maxCoeff();
             float y_mean = Y_d.mean();
@@ -439,7 +414,7 @@ public:
             Eigen::VectorXf RY_d = R_matrix_ * Y_d;
             float cost_d = Y_d.dot(RY_d);
             
-            // ✅ Debug output if negative
+            // Debug output if negative
             if (cost_d < 0) {
                 std::cerr << "\n=== NEGATIVE SMOOTHNESS COST ===" << "\n";
                 std::cerr << "Dimension: " << d << "\n";
@@ -661,18 +636,10 @@ protected:
             const auto& start_vec = config_->start_position;
             const auto& goal_vec = config_->goal_position;
             
-            // Create start/goal nodes
-            if (num_dimensions_ == 2) {
-                start_node_ = PathNode(start_vec[0], start_vec[1], node_radius_);
-                goal_node_ = PathNode(goal_vec[0], goal_vec[1], node_radius_);
-            } else if (num_dimensions_ == 3) {
-                start_node_ = PathNode(start_vec[0], start_vec[1], start_vec[2], node_radius_);
-                goal_node_ = PathNode(goal_vec[0], goal_vec[1], goal_vec[2], node_radius_);
-            } else {
-                std::cerr << "Unsupported dimensionality: " << num_dimensions_ << "\n";
-                return false;
-            }
-            
+            // Construct start_node_ and goal_node_ for general size start_vec and goal_vec
+            start_node_ = PathNode(Eigen::VectorXf::Map(start_vec.data(), start_vec.size()), node_radius_);
+            goal_node_ = PathNode(Eigen::VectorXf::Map(goal_vec.data(), goal_vec.size()), node_radius_);
+
             // Initialize trajectory structure
             initializeTrajectoryStructure(InterpolationMethod::LINEAR);
             

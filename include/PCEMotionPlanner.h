@@ -5,8 +5,8 @@
  */
 #pragma once
 
-#include "MotionPlanner.h"
-#include "task.h"
+#include <pce/MotionPlanner.h>
+#include <pce/task.h>
 #include <Eigen/Dense>
 #include <iostream>
 #include <random>
@@ -30,6 +30,7 @@ struct PCEConfig : public MotionPlannerConfig {
     
     // Derived parameter (computed from eta and temperature)
     float gamma = 0.5f;
+
     
     /**
      * @brief Load PCE-specific configuration from YAML node
@@ -67,7 +68,10 @@ struct PCEConfig : public MotionPlannerConfig {
                 if (temperature > 0.0f) {
                     gamma = eta / temperature;
                 }
+
             }
+
+            print();
             
             return validate();
             
@@ -199,6 +203,8 @@ public:
         
         // Call base class initialize with base config portion
         return MotionPlanner::initialize(config);
+
+        pce_config_->print();
     }
 
     /**

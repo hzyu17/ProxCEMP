@@ -75,15 +75,20 @@ struct CollisionAvoidanceConfig {
             cfg.obstacle_radius = env["obstacle_radius"].as<float>(cfg.obstacle_radius);
             cfg.clearance_distance = env["clearance_distance"].as<float>(cfg.clearance_distance);
             
-            // Optional: epsilon_sdf and sigma_obs can be in environment section
-            if (env["epsilon_sdf"]) {
-                cfg.epsilon_sdf = env["epsilon_sdf"].as<float>();
-            }
-            if (env["sigma_obs"]) {
-                cfg.sigma_obs = env["sigma_obs"].as<float>();
-            }
             if (env["min_spacing_factor"]) {
                 cfg.min_spacing_factor = env["min_spacing_factor"].as<float>();
+            }
+
+            // Load cost parameters
+            if (env["cost"]) {
+                const YAML::Node& cost = env["cost"];
+                
+                if (cost["epsilon_sdf"]) {
+                    cfg.epsilon_sdf = cost["epsilon_sdf"].as<float>();
+                }
+                if (cost["sigma_obs"]) {
+                    cfg.sigma_obs = cost["sigma_obs"].as<float>();
+                }
             }
         }
         
@@ -181,6 +186,10 @@ public:
         std::cout << "  Obstacle radius: " << config_.obstacle_radius << "\n";
         std::cout << "  Node collision radius: " << config_.node_collision_radius << "\n";
         std::cout << "  Random seed: " << config_.random_seed << "\n\n";
+
+        std::cout << "Cost:\n";
+        std::cout << "  Epsilon SDF:          " << config_.epsilon_sdf << "\n";
+        std::cout << "  Sigma obs:            " << config_.sigma_obs << "\n";
         
         // 2. Create obstacle map
         std::cout << "Creating obstacle map...\n";
@@ -294,7 +303,7 @@ public:
                   << "  Collision radius: " << node_collision_radius_ << "\n";
 
         // Precompute R matrix for smoothness cost
-        computeRMatrix(num_nodes, total_time);
+        // computeRMatrix(num_nodes, total_time);
     }
 
     /**
@@ -331,67 +340,57 @@ public:
                 // Compute signed distance
                 float dist = (task_pos - obs.center).norm();
                 float sdf = dist - (obs.radius + node_collision_radius_);
+
+                // Squared Hinge loss function: max(0, epsilon - signed_distance)^2
+                float hinge_loss = std::max(0.0f, epsilon_sdf_ - sdf);
                 
-                if (sdf < min_sdf) {
-                    min_sdf = sdf;
-                }
+                // Weighted squared hinge loss
+                total_cost += sigma_obs_ * hinge_loss * hinge_loss;
+                
+                // if (sdf < min_sdf) {
+                //     min_sdf = sdf;
+                // }
             }
             
-            // Apply smooth barrier function with clamping
-            if (min_sdf < epsilon_sdf_) {
-                float penetration = epsilon_sdf_ - min_sdf;
-                float exponent = penetration / sigma_obs_;
-                
-                // Clamp exponent to prevent overflow
-                if (exponent > MAX_EXPONENT) {
-                    total_cost += MAX_COST_PER_NODE;
-                    // Optional: Log warning for deep penetration
-                    if (i == 1) {  // Only log once per trajectory
-                        std::cerr << "Warning: Deep collision detected (penetration=" 
-                                  << penetration << "), clamping cost\n";
-                    }
-                } else {
-                    total_cost += std::exp(exponent);
-                }
-            }
+            
         }
 
         return total_cost;
     }
 
-    /**
-     * @brief Compute smoothness cost using R matrix (acceleration minimization)
-     */
-    float computeSmoothnessCost(const Trajectory& trajectory) const override {
-        if (trajectory.nodes.empty() || R_matrix_.rows() == 0) {
-            return 0.0f;
-        }
+    // /**
+    //  * @brief Compute smoothness cost using R matrix (acceleration minimization)
+    //  */
+    // float computeSmoothnessCost(const Trajectory& trajectory) const override {
+    //     if (trajectory.nodes.empty() || R_matrix_.rows() == 0) {
+    //         return 0.0f;
+    //     }
 
-        const size_t N = trajectory.nodes.size();
-        const size_t D = num_dimensions_;
+    //     const size_t N = trajectory.nodes.size();
+    //     const size_t D = num_dimensions_;
         
-        if (N != static_cast<size_t>(R_matrix_.rows())) {
-            std::cerr << "Warning: Trajectory size mismatch with R matrix\n";
-            return 0.0f;
-        }
+    //     if (N != static_cast<size_t>(R_matrix_.rows())) {
+    //         std::cerr << "Warning: Trajectory size mismatch with R matrix\n";
+    //         return 0.0f;
+    //     }
 
-        float total_cost = 0.0f;
+    //     float total_cost = 0.0f;
 
-        // Compute smoothness cost for each dimension
-        for (size_t d = 0; d < D; ++d) {
-            // Extract positions for dimension d
-            Eigen::VectorXf positions(N);
-            for (size_t i = 0; i < N; ++i) {
-                positions(i) = trajectory.nodes[i].position(d);
-            }
+    //     // Compute smoothness cost for each dimension
+    //     for (size_t d = 0; d < D; ++d) {
+    //         // Extract positions for dimension d
+    //         Eigen::VectorXf positions(N);
+    //         for (size_t i = 0; i < N; ++i) {
+    //             positions(i) = trajectory.nodes[i].position(d);
+    //         }
 
-            // Compute quadratic form: positions^T * R * positions
-            Eigen::VectorXf R_pos = R_matrix_ * positions;
-            total_cost += positions.dot(R_pos);
-        }
+    //         // Compute quadratic form: positions^T * R * positions
+    //         Eigen::VectorXf R_pos = R_matrix_ * positions;
+    //         total_cost += positions.dot(R_pos);
+    //     }
 
-        return total_cost;
-    }
+    //     return total_cost;
+    // }
 
     /**
      * @brief Get reference to obstacles (for visualization/debugging)
@@ -407,12 +406,12 @@ public:
         return obstacle_map_;
     }
 
-    /**
-     * @brief Get the R matrix used for smoothness cost
-     */
-    const SparseMatrixXf& getRMatrix() const {
-        return R_matrix_;
-    }
+    // /**
+    //  * @brief Get the R matrix used for smoothness cost
+    //  */
+    // const SparseMatrixXf& getRMatrix() const {
+    //     return R_matrix_;
+    // }
 
     /**
      * @brief Set collision cost parameters (can override config values)
@@ -435,58 +434,58 @@ public:
     }
 
 protected:
-    /**
-     * @brief Precompute the R = A^T * A matrix for smoothness cost
-     */
-    void computeRMatrix(size_t num_nodes, float total_time) {
-        float dt = total_time / static_cast<float>(num_nodes - 1);
-        float dt_sq = dt * dt;
-        float scale = 1.0f / (dt_sq * dt_sq);  // 1/dt^4
+    // /**
+    //  * @brief Precompute the R = A^T * A matrix for smoothness cost
+    //  */
+    // void computeRMatrix(size_t num_nodes, float total_time) {
+    //     float dt = total_time / static_cast<float>(num_nodes - 1);
+    //     float dt_sq = dt * dt;
+    //     float scale = 1.0f / (dt_sq * dt_sq);  // 1/dt^4
 
-        R_matrix_.resize(num_nodes, num_nodes);
-        R_matrix_.setZero();
+    //     R_matrix_.resize(num_nodes, num_nodes);
+    //     R_matrix_.setZero();
         
-        if (num_nodes < 3) {
-            return;  // R is zero for N < 3
-        }
+    //     if (num_nodes < 3) {
+    //         return;  // R is zero for N < 3
+    //     }
 
-        R_matrix_.reserve(Eigen::VectorXi::Constant(num_nodes, 5));
-        std::vector<Eigen::Triplet<float>> triplets;
+    //     R_matrix_.reserve(Eigen::VectorXi::Constant(num_nodes, 5));
+    //     std::vector<Eigen::Triplet<float>> triplets;
 
-        // Build pentadiagonal matrix R = A^T * A
-        // Main diagonal: R[i,i]
-        triplets.emplace_back(0, 0, scale * 1.0f);
-        triplets.emplace_back(1, 1, scale * 5.0f);
-        for (size_t i = 2; i < num_nodes - 2; ++i) {
-            triplets.emplace_back(i, i, scale * 6.0f);
-        }
-        triplets.emplace_back(num_nodes - 2, num_nodes - 2, scale * 5.0f);
-        triplets.emplace_back(num_nodes - 1, num_nodes - 1, scale * 1.0f);
+    //     // Build pentadiagonal matrix R = A^T * A
+    //     // Main diagonal: R[i,i]
+    //     triplets.emplace_back(0, 0, scale * 1.0f);
+    //     triplets.emplace_back(1, 1, scale * 5.0f);
+    //     for (size_t i = 2; i < num_nodes - 2; ++i) {
+    //         triplets.emplace_back(i, i, scale * 6.0f);
+    //     }
+    //     triplets.emplace_back(num_nodes - 2, num_nodes - 2, scale * 5.0f);
+    //     triplets.emplace_back(num_nodes - 1, num_nodes - 1, scale * 1.0f);
 
-        // First off-diagonal: R[i,i+1] and R[i+1,i]
-        triplets.emplace_back(0, 1, scale * (-2.0f));
-        triplets.emplace_back(1, 0, scale * (-2.0f));
+    //     // First off-diagonal: R[i,i+1] and R[i+1,i]
+    //     triplets.emplace_back(0, 1, scale * (-2.0f));
+    //     triplets.emplace_back(1, 0, scale * (-2.0f));
         
-        for (size_t i = 1; i < num_nodes - 2; ++i) {
-            triplets.emplace_back(i, i + 1, scale * (-4.0f));
-            triplets.emplace_back(i + 1, i, scale * (-4.0f));
-        }
+    //     for (size_t i = 1; i < num_nodes - 2; ++i) {
+    //         triplets.emplace_back(i, i + 1, scale * (-4.0f));
+    //         triplets.emplace_back(i + 1, i, scale * (-4.0f));
+    //     }
         
-        triplets.emplace_back(num_nodes - 2, num_nodes - 1, scale * (-2.0f));
-        triplets.emplace_back(num_nodes - 1, num_nodes - 2, scale * (-2.0f));
+    //     triplets.emplace_back(num_nodes - 2, num_nodes - 1, scale * (-2.0f));
+    //     triplets.emplace_back(num_nodes - 1, num_nodes - 2, scale * (-2.0f));
 
-        // Second off-diagonal: R[i,i+2] and R[i+2,i]
-        triplets.emplace_back(0, 2, scale * 1.0f);
-        triplets.emplace_back(2, 0, scale * 1.0f);
+    //     // Second off-diagonal: R[i,i+2] and R[i+2,i]
+    //     triplets.emplace_back(0, 2, scale * 1.0f);
+    //     triplets.emplace_back(2, 0, scale * 1.0f);
         
-        for (size_t i = 1; i < num_nodes - 2; ++i) {
-            triplets.emplace_back(i, i + 2, scale * 1.0f);
-            triplets.emplace_back(i + 2, i, scale * 1.0f);
-        }
+    //     for (size_t i = 1; i < num_nodes - 2; ++i) {
+    //         triplets.emplace_back(i, i + 2, scale * 1.0f);
+    //         triplets.emplace_back(i + 2, i, scale * 1.0f);
+    //     }
 
-        R_matrix_.setFromTriplets(triplets.begin(), triplets.end());
-        R_matrix_.makeCompressed();
-    }
+    //     R_matrix_.setFromTriplets(triplets.begin(), triplets.end());
+    //     R_matrix_.makeCompressed();
+    // }
 
 private:
     // Obstacle management
@@ -511,8 +510,8 @@ private:
     PathNode start_node_;
     PathNode goal_node_;
 
-    // Smoothness cost matrix
-    SparseMatrixXf R_matrix_;
+    // // Smoothness cost matrix
+    // SparseMatrixXf R_matrix_;
 };
 
 }  // namespace pce

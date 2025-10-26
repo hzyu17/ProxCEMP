@@ -3,7 +3,7 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <memory>
-#include "Trajectory.h"
+#include <pce/Trajectory.h>
 
 /**
  * @brief Abstract base class for forward kinematics transformations.

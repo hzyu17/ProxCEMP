@@ -12,11 +12,7 @@ find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
 # GLM (header-only, may need manual path if not in system)
-find_package(glm QUIET)
-if(NOT glm_FOUND)
-    # Fallback: add GLM include directory manually if needed
-    set(GLM_INCLUDE_DIR "/usr/include" CACHE PATH "Path to GLM headers")
-endif()
+set(GLM_INCLUDE_DIR "/usr/include" CACHE PATH "Path to GLM headers")
 
 # Include directories
 include_directories(

@@ -57,17 +57,17 @@ public:
      * @param trajectory The trajectory to evaluate
      * @return The smoothness cost (lower = smoother)
      */
-    virtual float computeSmoothnessCost(const Trajectory& trajectory) const = 0;
+    // virtual float computeSmoothnessCost(const Trajectory& trajectory) const = 0;
 
-    /**
-     * @brief Compute the total cost (collision + smoothness).
-     * 
-     * @param trajectory The trajectory to evaluate
-     * @return The total cost
-     */
-    virtual float computeTotalCost(const Trajectory& trajectory) const {
-        return computeCollisionCost(trajectory) + computeSmoothnessCost(trajectory);
-    }
+    // /**
+    //  * @brief Compute the total cost (collision + smoothness).
+    //  * 
+    //  * @param trajectory The trajectory to evaluate
+    //  * @return The total cost
+    //  */
+    // virtual float computeTotalCost(const Trajectory& trajectory) const {
+    //     return computeCollisionCost(trajectory) + computeSmoothnessCost(trajectory);
+    // }
 
     /**
      * @brief Filter a trajectory to satisfy constraints (e.g., joint limits).
