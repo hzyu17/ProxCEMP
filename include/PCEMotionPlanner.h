@@ -5,8 +5,8 @@
  */
 #pragma once
 
-#include <pce/MotionPlanner.h>
-#include <pce/task.h>
+#include "MotionPlanner.h"
+#include "task.h"
 #include <Eigen/Dense>
 #include <iostream>
 #include <random>
