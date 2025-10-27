@@ -10,7 +10,7 @@
  */
 #pragma once
 
-#include <pce/Trajectory.h>
+#include "Trajectory.h"
 #include "ForwardKinematics.h"
 #include <vector> 
 #include <random> 
