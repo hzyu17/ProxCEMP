@@ -3,5 +3,5 @@ mujoco_menagerie/*
 ompl-pybullet-env/*
 **/build
 venv/*
-
+**/*.png
 .vscode/*

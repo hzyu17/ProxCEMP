@@ -12,9 +12,10 @@ environment:
   num_obstacles: 20
   obstacle_radius: 20.0
   clearance_distance: 100.0
-  
-  start_position: [50.0, 550.0]
-  goal_position: [750.0, 50.0]
+
+  cost:
+    epsilon_sdf: 10.0
+    sigma_obs: 10.0
 
 motion_planning:
   num_dimensions: 2
@@ -22,16 +23,15 @@ motion_planning:
   total_time: 10.0
   node_collision_radius: 15.0
 
+  start_position: [50.0, 550.0]
+  goal_position: [750.0, 50.0]
+
 pce_planner:
   num_samples: 3000
   num_iterations: 10
   eta: 1.0
   temperature: 1.5
   convergence_threshold: 0.01
-  
-  cost:
-    epsilon_sdf: 10.0
-    sigma_obs: 1.0
 
 ngd_planner:
   num_samples: 3000

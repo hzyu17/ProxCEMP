@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Eigen3 REQUIRED)
+
+if(NOT TARGET PCE::pce_motion_planner)
+    include("${CMAKE_CURRENT_LIST_DIR}/PCEMotionPlannerTargets.cmake")
+endif()
+
+check_required_components(PCEMotionPlanner)

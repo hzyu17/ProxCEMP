@@ -3,113 +3,87 @@
 #include <vector> 
 #include <random> 
 #include <cmath> 
+#include <memory>
 
 #include "../include/PCEMotionPlanner.h" 
+#include "../include/CollisionAvoidanceTask.h"
 #include "../include/visualization.h"
-
+#include <string>
 
 int main() {
-    // --- 1. Setup ---
-    int numInitialNodes = 100;
-    float initialTotalTime = 8.0f;
-    float nodeCollisionRadius = 15.0f;
-    unsigned int randomSeed = std::random_device{}();  // Default: random seed
+    // --- 1. Load Configuration ---
+    std::string config_file = "../configs/config.yaml";
     YAML::Node config;
-
-    // Read values from config.yaml
+    
+    std::cout << "=== Load from YAML ===\n\n";
+    
     try {
-        config = YAML::LoadFile("../configs/config.yaml");
-
-        if (config["experiment"]) {
-            const YAML::Node& experimentConfig = config["experiment"];
-            // Read random seed from config
-            if (experimentConfig["random_seed"]) {
-                randomSeed = experimentConfig["random_seed"].as<unsigned int>();
-                std::cout << "Using seed from config: " << randomSeed << "\n";
-            } else {
-                std::cout << "No seed in config. Using random seed: " << randomSeed << "\n";
-            }
-        }
-
-        if (config["motion_planning"]) {
-            const YAML::Node& plannerConfig = config["motion_planning"];
-            if (plannerConfig["num_discretization"]) {
-                numInitialNodes = plannerConfig["num_discretization"].as<int>();
-            }
-            if (plannerConfig["total_time"]) {
-                initialTotalTime = plannerConfig["total_time"].as<float>();
-            }
-            if (plannerConfig["node_collision_radius"]) {
-                nodeCollisionRadius = plannerConfig["node_collision_radius"].as<float>();
-            }
-        }
+        config = YAML::LoadFile(config_file);
+        std::cout << "Loaded configuration from: " << config_file << "\n";
     } catch (const YAML::BadFile& e) {
-        std::cerr << "Warning: Could not open config.yaml. Using default values.\n";
+        std::cerr << "Error: Could not open config file: " << config_file << "\n";
+        return 1;
     } catch (const YAML::Exception& e) {
-        std::cerr << "Error parsing config.yaml: " << e.what() << ". Using default values.\n";
+        std::cerr << "Error parsing config file: " << e.what() << "\n";
+        return 1;
     }
 
-    std::cout << "Visualization parameters:\n"
-              << "  num_discretization: " << numInitialNodes << "\n"
-              << "  total_time: " << initialTotalTime << "\n"
-              << "  node_collision_radius: " << nodeCollisionRadius << "\n"
-              << "  random_seed: " << randomSeed << "\n";
-
-    // --- 2. Create Obstacle Map with Seed ---
-    ObstacleMap obstacle_map(2);  // 2D obstacle map
-    obstacle_map.setMapSize(MAP_WIDTH, MAP_HEIGHT);
+    // --- 2. Create Task (handles obstacle generation and management) ---
+    std::cout << "\n=== Creating Collision Avoidance Task ===\n";
+    auto task = std::make_shared<pce::CollisionAvoidanceTask>(config);
     
-    // Set the seed before generating obstacles
-    obstacle_map.setSeed(randomSeed);
-    obstacle_map.generateRandom(NUM_OBSTACLES, OBSTACLE_RADIUS);
+    // Get obstacle map from task
+    auto obstacle_map = task->getObstacleMap();
+    std::cout << "Task created with " << obstacle_map->size() << " obstacles\n";
+
+    // --- 3. Create and Initialize Planner ---
+    std::cout << "\n=== Creating PCEM Planner ===\n";
+    PCEConfig pce_config;
+    if (!pce_config.loadFromFile(config_file)) {
+        std::cerr << "Failed to load PCE configuration from file\n";
+        return -1;
+    }
+    ProximalCrossEntropyMotionPlanner planner(task);
     
-    std::cout << "Generated " << obstacle_map.size() << " obstacles\n";
-
-    // Define start/goal
-    PathNode start(50.0f, 550.0f, nodeCollisionRadius);   // Bottom left
-    PathNode goal(750.0f, 50.0f, nodeCollisionRadius);    // Top right
-
-    std::cout << "Start: [" << start.position(0) << ", " << start.position(1) << "], radius=" << start.radius << "\n";
-    std::cout << "Goal:  [" << goal.position(0) << ", " << goal.position(1) << "], radius=" << goal.radius << "\n";
-
-    // --- 3. Motion Planning Initialization ---
-    float clearance_dist = 100.0f;
+    // Initialize planner (loads config and sets up trajectory)
+    std::cout << "\n=== Initializing Planner ===\n";
+    if (!planner.initialize(pce_config)) {
+        std::cerr << "Error: Planner initialization failed\n";
+        return 1;
+    }
     
-    // Initialize the PCEM planner with ObstacleMap
-    ProximalCrossEntropyMotionPlanner planner;
-    planner.initialize(start, goal, numInitialNodes, initialTotalTime, 
-                      InterpolationMethod::LINEAR, obstacle_map, clearance_dist);
-
-    std::cout << "Planner initialized in " << planner.getNumDimensions() << "D space\n";
-    std::cout << "Obstacles after clearance: " << obstacle_map.size() << "\n";
+    std::cout << "Initial trajectory has " << planner.getCurrentTrajectory().nodes.size() 
+              << " nodes\n";
 
     // --- 4. Visualization Setup ---
-    sf::RenderWindow window(sf::VideoMode({MAP_WIDTH, MAP_HEIGHT}), 
-                           "Trajectory Visualization - Collision Status Display", 
-                           sf::Style::Titlebar | sf::Style::Close);
+    unsigned int map_width = 800;
+    unsigned int map_height = 600;
+    
+    if (config["environment"]) {
+        map_width = config["environment"]["map_width"].as<unsigned int>(map_width);
+        map_height = config["environment"]["map_height"].as<unsigned int>(map_height);
+    }
+    
+    sf::RenderWindow window(
+        sf::VideoMode({map_width, map_height}), 
+        "Trajectory Visualization - Collision Status Display", 
+        sf::Style::Titlebar | sf::Style::Close
+    );
     window.setFramerateLimit(60);
 
     std::cout << "\n=== Controls ===\n";
     std::cout << "SPACE:  Start optimization\n";
-    std::cout << "R:      Reset\n";
-    std::cout << "C:      Toggle collision radius display\n";
+    std::cout << "R:      Reset (regenerate trajectory)\n";
+    std::cout << "C:      Toggle collision spheres display\n";
     std::cout << "ESC:    Quit\n";
-    std::cout << "\nCollision radius colors:\n";
-    std::cout << "  GREEN = No collision\n";
-    std::cout << "  RED   = In collision\n";
+    std::cout << "\nCollision sphere colors:\n";
+    std::cout << "  GREEN  = Safe (no collision)\n";
+    std::cout << "  ORANGE = Near collision\n";
+    std::cout << "  RED    = In collision\n";
     std::cout << "================\n\n";
 
-    bool optimized = false;
-    bool show_collision_radius = true;
-
-    // Count initial collisions
-    size_t initial_collisions = 0;
-    for (const auto& node : planner.getCurrentTrajectory().nodes) {
-        if (isNodeInCollision(node, planner.getObstacles())) {
-            initial_collisions++;
-        }
-    }
-    std::cout << "Initial trajectory has " << initial_collisions << " nodes in collision\n";
+    bool show_collision_spheres = true;
+    float collision_threshold = 10.0f;
 
     // --- 5. Main Loop ---
     while (window.isOpen()) {
@@ -126,55 +100,72 @@ int main() {
                 }
                 
                 if (key_event->code == sf::Keyboard::Key::C) {
-                    show_collision_radius = !show_collision_radius;
-                    std::cout << "Collision radius display: " 
-                              << (show_collision_radius ? "ON" : "OFF") << "\n";
+                    show_collision_spheres = !show_collision_spheres;
+                    std::cout << "Collision spheres display: " 
+                              << (show_collision_spheres ? "ON" : "OFF") << "\n";
                 }
                 
                 if (key_event->code == sf::Keyboard::Key::R) {
-                    std::cout << "\n--- Resetting ---\n";
+                    std::cout << "\n--- Resetting Trajectory ---\n";
                     
-                    // Regenerate obstacles with the same seed
-                    obstacle_map.clear();
-                    obstacle_map.setSeed(randomSeed);
-                    obstacle_map.generateRandom(NUM_OBSTACLES, OBSTACLE_RADIUS);
-                    std::cout << "Regenerated " << obstacle_map.size() << " obstacles\n";
-                    
-                    // Reinitialize planner
-                    planner.initialize(start, goal, numInitialNodes, initialTotalTime, 
-                                     InterpolationMethod::LINEAR, obstacle_map, clearance_dist);
-                    
-                    std::cout << "Obstacles after clearance: " << obstacle_map.size() << "\n";
-                    
-                    // Count collisions after reset
-                    size_t reset_collisions = 0;
-                    for (const auto& node : planner.getCurrentTrajectory().nodes) {
-                        if (isNodeInCollision(node, planner.getObstacles())) {
-                            reset_collisions++;
-                        }
+                    // Re-initialize to get a fresh trajectory
+                    if (!planner.initialize(pce_config)) {
+                        std::cerr << "Error: Reset failed\n";
+                    } else {
+                        std::cout << "Trajectory reset with " 
+                                  << planner.getCurrentTrajectory().nodes.size() 
+                                  << " nodes\n";
                     }
-                    std::cout << "Reset trajectory has " << reset_collisions << " nodes in collision\n";
+                }
+                
+                if (key_event->code == sf::Keyboard::Key::Space) {
+                    std::cout << "\n--- Starting Optimization ---\n";
                     
-                    optimized = false;
+                    // Run optimization (no parameters needed)
+                    if (planner.optimize()) {
+                        std::cout << "Optimization completed successfully\n";
+                    } else {
+                        std::cout << "Optimization failed or interrupted\n";
+                    }
                 }
             }
         }
         
         // --- Render current state ---
-        window.clear(sf::Color(240, 240, 240));
-        
-        // 1. Draw obstacles from the map
-        drawObstacleMap(window, obstacle_map);
-        
-        // 2. Draw current trajectory with collision-colored radii
         const Trajectory& current_traj = planner.getCurrentTrajectory();
-        drawTrajectoryWithCollisionRadius(window, current_traj, planner.getObstacles(), 
-                                         show_collision_radius);
+        
+        if (show_collision_spheres) {
+            // Draw trajectory with collision spheres showing collision status
+            visualizeTrajectoryWithCollisionSpheres(
+                window, 
+                *obstacle_map, 
+                current_traj, 
+                collision_threshold,
+                true  // clear background
+            );
+        } else {
+            // Draw simple trajectory without collision spheres
+            visualizeTrajectory(
+                window, 
+                *obstacle_map, 
+                current_traj, 
+                sf::Color(0, 0, 255, 255),  // Blue trajectory
+                true  // clear background
+            );
+        }
         
         window.display();
     }
 
-    obstacle_map.saveToJSON("obstacle_map_seed_999.json");
+    // --- 6. Save Results ---
+    // Get random seed from task config
+    unsigned int seed = 999;
+    if (config["experiment"] && config["experiment"]["random_seed"]) {
+        seed = config["experiment"]["random_seed"].as<unsigned int>();
+    }
+    
+    obstacle_map->saveToJSON("obstacle_map_seed_" + std::to_string(seed) + ".json");
+    std::cout << "\nSaved obstacle map to obstacle_map_seed_" << seed << ".json\n";
 
     return 0;
 }
