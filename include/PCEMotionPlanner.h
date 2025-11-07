@@ -27,10 +27,11 @@ struct PCEConfig : public MotionPlannerConfig {
     float eta = 1.0f;
     float temperature = 1.5f;
     float convergence_threshold = 0.01f;
+    float collision_clearance = 0.1f;
+    float collision_threshold = 0.1f;
     
     // Derived parameter (computed from eta and temperature)
     float gamma = 0.5f;
-
     
     /**
      * @brief Load PCE-specific configuration from YAML node
@@ -62,6 +63,12 @@ struct PCEConfig : public MotionPlannerConfig {
                 }
                 if (pce["convergence_threshold"]) {
                     convergence_threshold = pce["convergence_threshold"].as<float>();
+                }
+                if (pce["collision_clearance"]) {
+                    collision_clearance = pce["collision_clearance"].as<float>();
+                }
+                if (pce["collision_threshold"]) {
+                    collision_threshold = pce["collision_threshold"].as<float>();
                 }
                 
                 // Compute gamma from eta and temperature
@@ -116,6 +123,16 @@ struct PCEConfig : public MotionPlannerConfig {
             std::cerr << "Error: convergence_threshold must be non-negative\n";
             return false;
         }
+
+        if (collision_clearance < 0.0f) {
+            std::cerr << "Error: collision_clearance must be non-negative\n";
+            return false;
+        }
+
+        if (collision_threshold < 0.0f) {
+            std::cerr << "Error: collision_threshold must be non-negative\n";
+            return false;
+        }
         
         return true;
     }
@@ -138,6 +155,8 @@ struct PCEConfig : public MotionPlannerConfig {
         std::cout << "Initial gamma:          " << gamma << "\n";
         std::cout << "Gamma decay:            0.99 (alpha)\n";
         std::cout << "Convergence threshold:  " << convergence_threshold << "\n";
+        std::cout << "Collision clearance:    " << collision_clearance << "\n";
+        std::cout << "Collision threshold:    " << collision_threshold << "\n";
         std::cout << "\n";
     }
 };
