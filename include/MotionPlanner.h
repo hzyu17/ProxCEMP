@@ -237,6 +237,7 @@ public:
      * After calling this, the planner is ready for optimize()
      */
     virtual bool initialize(const MotionPlannerConfig& config) {
+        
         // Store configuration
         config_ = std::make_shared<MotionPlannerConfig>(config);
         
@@ -257,18 +258,10 @@ public:
         random_engine_.seed(random_seed_);
         
         // Print configuration
-        std::cout << "Initializing " << getPlannerName() << " planner...\n";
+        config_->print();
         
         // Open log file
         openLog();
-        // log("=== Configuration ===");
-        // logf("Planner: %s", getPlannerName().c_str());
-        // logf("Dimensions: %zu", num_dimensions_);
-        // logf("Nodes: %zu", num_nodes_);
-        // logf("Total time: %.2f", total_time_);
-        // logf("Node radius: %.2f", node_radius_);
-        // logf("Random seed: %u", random_seed_);
-        // log("");
         
         // Initialize trajectory
         if (!initializeTrajectory()) {
@@ -276,12 +269,7 @@ public:
             return false;
         }
         
-        // Log planner-specific configuration
-        // logPlannerSpecificConfig();
-        
         is_initialized_ = true;
-        
-        std::cout << "Planner initialized successfully\n\n";
         return true;
     }
 

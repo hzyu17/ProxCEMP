@@ -189,22 +189,40 @@ public:
      * @param config PCE configuration object
      * @return true if initialization successful
      */
-    bool initialize(const PCEConfig& config) {
+    bool initialize(const PCEConfig& config) 
+    {
+        
         // Store PCE config (also stores base config)
-        pce_config_ = std::make_shared<PCEConfig>(config);
+        try {
+            pce_config_ = std::make_shared<PCEConfig>(config);
+        } catch (const std::exception& e) {
+            std::cerr << "ERROR: Exception creating pce_config_: " << e.what() << std::endl;
+            return false;
+        }
         
         // Extract PCE-specific parameters
         num_samples_ = config.num_samples;
         num_iterations_ = config.num_iterations;
         temperature_ = config.temperature;
+        
         eta_ = config.eta;
         gamma_ = config.gamma;
         convergence_threshold_ = config.convergence_threshold;
-        
+                
         // Call base class initialize with base config portion
-        return MotionPlanner::initialize(config);
-
-        pce_config_->print();
+        bool result = false;
+        try {
+            result = MotionPlanner::initialize(config);
+        } catch (const std::exception& e) {
+            std::cerr << "ERROR: Exception in MotionPlanner::initialize: " << e.what() << std::endl;
+            return false;
+        }
+        
+        if (result) {
+            pce_config_->print();
+        }
+        
+        return result;
     }
 
     /**
