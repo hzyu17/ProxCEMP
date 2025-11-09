@@ -209,7 +209,9 @@ public:
     using VectorXf = Eigen::VectorXf;
     using SparseMatrixXf = Eigen::SparseMatrix<float>;
 
-    MotionPlanner() {
+    MotionPlanner():
+        L_solver_()
+    {
         std::random_device rd;
         random_engine_.seed(rd());
     }
@@ -324,20 +326,20 @@ public:
      * @param method Interpolation method
      */
     virtual void initializeTrajectoryStructure(InterpolationMethod method = InterpolationMethod::LINEAR) {
-        
+
         if (num_nodes_ < 2) {
             throw std::invalid_argument("num_nodes must be >= 2");
         }
-
+        
         // Store trajectory parameters
         current_trajectory_.nodes.clear();
         current_trajectory_.total_time = total_time_;
         current_trajectory_.start_index = 0;
         current_trajectory_.goal_index = num_nodes_ - 1;
-
+        
         // Update forward kinematics
         fk_ = std::make_shared<IdentityFK>(num_dimensions_);
-
+        
         // Build interpolated trajectory
         for (size_t i = 0; i < num_nodes_; ++i) {
             float t = static_cast<float>(i) / (num_nodes_ - 1);
@@ -345,7 +347,7 @@ public:
             float radius = start_node_.radius;
             current_trajectory_.nodes.emplace_back(pos, radius);
         }
-
+        
         // Compute R = A^T A for smoothness costs
         computeRMatrix(num_nodes_, total_time_);
     }
@@ -556,13 +558,13 @@ protected:
         // Compute scaling (use double for intermediate calculations)
         double dt = static_cast<double>(total_time) / static_cast<double>(num_nodes - 1);
         double dt_sq = dt * dt;
-        double scale = 1.0 / (dt_sq * dt_sq);  // Use double precision
+        double scale = 1.0 / (dt_sq * dt_sq);
         
         // Build R_free with DOUBLE precision
         Eigen::SparseMatrix<double> R_free(N_free, N_free);
         R_free.reserve(Eigen::VectorXi::Constant(N_free, 5));
         
-        std::vector<Eigen::Triplet<double>> triplets;  // Use double
+        std::vector<Eigen::Triplet<double>> triplets; 
         
         if (N_free == 1) {
             triplets.emplace_back(0, 0, 6.0 * scale);
@@ -624,10 +626,21 @@ protected:
             const auto& start_vec = config_->start_position;
             const auto& goal_vec = config_->goal_position;
             
-            // Construct start_node_ and goal_node_ for general size start_vec and goal_vec
-            start_node_ = PathNode(Eigen::VectorXf::Map(start_vec.data(), start_vec.size()), node_radius_);
-            goal_node_ = PathNode(Eigen::VectorXf::Map(goal_vec.data(), goal_vec.size()), node_radius_);
-
+            // Create actual VectorXf copies, not Maps
+            Eigen::VectorXf start_eigen(start_vec.size());
+            for (size_t i = 0; i < start_vec.size(); ++i) {
+                start_eigen[i] = start_vec[i];
+            }
+            
+            Eigen::VectorXf goal_eigen(goal_vec.size());
+            for (size_t i = 0; i < goal_vec.size(); ++i) {
+                goal_eigen[i] = goal_vec[i];
+            }
+            
+            // Construct start_node_ and goal_node_
+            start_node_ = PathNode(start_eigen, node_radius_);
+            goal_node_ = PathNode(goal_eigen, node_radius_);
+            
             // Initialize trajectory structure
             initializeTrajectoryStructure(InterpolationMethod::LINEAR);
             
@@ -657,17 +670,18 @@ protected:
         float dt = total_time / static_cast<float>(num_nodes - 1);
         float dt_sq = dt * dt;
         float scale = 1.0f / (dt_sq * dt_sq);
-
-        R_matrix_.resize(num_nodes, num_nodes);
-        R_matrix_.setZero();
         
         if (num_nodes < 3) {
+            R_matrix_ = Eigen::SparseMatrix<float>(num_nodes, num_nodes);
+            R_matrix_.setIdentity();
             return;
         }
-
+        
+        // For sparse matrix, recreate it
+        R_matrix_ = Eigen::SparseMatrix<float>(num_nodes, num_nodes);
         R_matrix_.reserve(Eigen::VectorXi::Constant(num_nodes, 5));
         std::vector<Eigen::Triplet<float>> triplets;
-
+        
         // Main diagonal
         triplets.emplace_back(0, 0, scale * 1.0f);
         triplets.emplace_back(1, 1, scale * 5.0f);
@@ -676,7 +690,7 @@ protected:
         }
         triplets.emplace_back(num_nodes - 2, num_nodes - 2, scale * 5.0f);
         triplets.emplace_back(num_nodes - 1, num_nodes - 1, scale * 1.0f);
-
+        
         // First off-diagonal
         triplets.emplace_back(0, 1, scale * (-2.0f));
         triplets.emplace_back(1, 0, scale * (-2.0f));
@@ -686,7 +700,7 @@ protected:
         }
         triplets.emplace_back(num_nodes - 2, num_nodes - 1, scale * (-2.0f));
         triplets.emplace_back(num_nodes - 1, num_nodes - 2, scale * (-2.0f));
-
+        
         // Second off-diagonal
         triplets.emplace_back(0, 2, scale * 1.0f);
         triplets.emplace_back(2, 0, scale * 1.0f);
@@ -694,19 +708,19 @@ protected:
             triplets.emplace_back(i, i + 2, scale * 1.0f);
             triplets.emplace_back(i + 2, i, scale * 1.0f);
         }
-
+        
         R_matrix_.setFromTriplets(triplets.begin(), triplets.end());
         R_matrix_.makeCompressed();
-
+        
         // Compute Cholesky decomposition
         if (num_nodes >= 3) {
             precomputeCholeskyFactorization(num_nodes, total_time);
         }
-
-        storeTrajectory();
         
-    }
+        storeTrajectory();
 
+    }
+ 
     // ============= Trajectory Utilities =============
     
     /**

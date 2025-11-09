@@ -297,7 +297,18 @@ public:
         const size_t M = num_samples_;
         const size_t D = num_dimensions_;
 
-        // Compute initial cost using Task
+        // Validate trajectory
+        if (N == 0) {
+            std::cerr << "Error: Current trajectory has no nodes!\n";
+            return false;
+        }
+        
+        if (current_trajectory_.nodes[0].position.size() != D) {
+            std::cerr << "Error: Dimension mismatch in trajectory!\n";
+            return false;
+        }
+
+        // Compute initial costs
         float collision_cost = task_->computeCollisionCost(current_trajectory_);
         float smoothness_cost = computeSmoothnessCost(current_trajectory_);
         float cost = collision_cost + smoothness_cost;
@@ -310,6 +321,7 @@ public:
 
         storeTrajectory();
         
+        // Main optimization loop
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
             // Update parameters
             gamma_ = gamma_ * std::pow(alpha, iteration-1);
@@ -320,19 +332,56 @@ public:
 
             // Extract trajectory as matrix
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
+            
+            if (Y_k.rows() != static_cast<long>(D) || Y_k.cols() != static_cast<long>(N)) {
+                std::cerr << "Error: Matrix size mismatch!\n";
+                return false;
+            }
 
             // Sample noise matrices
             std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
+            
+            if (epsilon_samples.size() != M) {
+                std::cerr << "Error: Wrong number of noise matrices!\n";
+                return false;
+            }
+            
+            // Create perturbed trajectories
+            std::vector<Trajectory> sample_trajectories;
+            sample_trajectories.reserve(M);
+            
+            for (size_t m = 0; m < M; ++m) {
+                Trajectory sample_traj = createPerturbedTrajectory(Y_k, epsilon_samples[m]);
+                
+                if (sample_traj.nodes.size() != N) {
+                    std::cerr << "Error: Sample trajectory has wrong size!\n";
+                    return false;
+                }
+                
+                sample_trajectories.push_back(sample_traj);
+            }
+            
+            // Batch evaluate collision costs
+            std::vector<float> sample_collisions = task_->computeCollisionCost(sample_trajectories);
+            
+            if (sample_collisions.size() != M) {
+                std::cerr << "Error: Wrong number of collision costs!\n";
+                return false;
+            }
+            
+            // Check for invalid costs and fix
+            for (size_t m = 0; m < sample_collisions.size(); ++m) {
+                if (!std::isfinite(sample_collisions[m])) {
+                    sample_collisions[m] = 1e6f;  // Large penalty
+                }
+            }
             
             // Compute weights
             Eigen::VectorXf weights(M);
             float max_exponent = -std::numeric_limits<float>::infinity();
 
             for (size_t m = 0; m < M; ++m) {
-                Trajectory sample_traj = createPerturbedTrajectory(Y_k, epsilon_samples[m]);
-            
-                // Use Task to compute collision cost
-                float sample_collision = task_->computeCollisionCost(sample_traj);
+                float sample_collision = sample_collisions[m];
                 
                 // Regularization term per dimension
                 float reg_term = 0.0f;
@@ -345,24 +394,36 @@ public:
                 }
 
                 float exponent = -gamma_ * (sample_collision + reg_term) / temperature_;
+                
+                if (!std::isfinite(exponent)) {
+                    exponent = -1e6f;  // Very small weight
+                }
 
                 if (exponent > max_exponent) {
                     max_exponent = exponent;
-                }                
-                weights(m) = exponent; 
+                }
+                
+                weights(m) = exponent;
             }
             
             // Normalize weights
             weights = (weights.array() - max_exponent).exp();
             float weight_sum = weights.sum();
-            weights /= weight_sum;
+            
+            if (!std::isfinite(weight_sum) || weight_sum < 1e-10f) {
+                weights.setConstant(1.0f / M);  // Uniform weights as fallback
+            } else {
+                weights /= weight_sum;
+            }
             
             // Compute Y_{k+1} via weighted mean update
             MatrixXf Y_new = MatrixXf::Zero(D, N);
+            
             for (size_t m = 0; m < M; ++m) {
                 Eigen::MatrixXf temp = Y_k + epsilon_samples[m];
                 Y_new += weights(m) * temp;
             }
+            
             updateTrajectoryFromMatrix(Y_new);
 
             // Fix start and goal
@@ -380,7 +441,7 @@ public:
             // Store trajectory
             storeTrajectory();
 
-            // Recalculate costs using Task
+            // Recalculate costs
             collision_cost = task_->computeCollisionCost(current_trajectory_);
             smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float new_cost = collision_cost + smoothness_cost;
@@ -407,7 +468,7 @@ public:
         if (best_iteration < trajectory_history_.size()) {
             current_trajectory_ = trajectory_history_[best_iteration];
             logf("\n*** Restoring best trajectory from iteration %zu with cost %.2f ***", 
-                 best_iteration, best_cost);
+                best_iteration, best_cost);
         }
         
         // Notify task of completion
@@ -415,15 +476,15 @@ public:
         task_->done(success, num_iterations_, best_cost, current_trajectory_);
         
         logf("PCEM finished. Final Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
-             task_->computeCollisionCost(current_trajectory_) + computeSmoothnessCost(current_trajectory_),
-             task_->computeCollisionCost(current_trajectory_), 
-             computeSmoothnessCost(current_trajectory_));
+            task_->computeCollisionCost(current_trajectory_) + computeSmoothnessCost(current_trajectory_),
+            task_->computeCollisionCost(current_trajectory_), 
+            computeSmoothnessCost(current_trajectory_));
 
         log("\nLog saved to: " + getLogFilename());
 
         return success;
     }
-    
+
 
 protected:
     

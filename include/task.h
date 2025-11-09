@@ -49,6 +49,32 @@ public:
     virtual float computeCollisionCost(const Trajectory& trajectory) const = 0;
 
     /**
+     * @brief Compute collision costs for multiple trajectories (batch processing).
+     * 
+     * This overload enables efficient batch evaluation of trajectory samples,
+     * which is critical for PCE optimization. Implementations may use GPU
+     * acceleration or parallel CPU processing.
+     * 
+     * Default implementation: calls single-trajectory version in a loop.
+     * Derived classes should override for better performance.
+     * 
+     * @param trajectories Vector of trajectories to evaluate (typically many samples)
+     * @return Vector of collision costs (one per trajectory)
+     */
+    virtual std::vector<float> computeCollisionCost(
+        const std::vector<Trajectory>& trajectories) const 
+    {
+        // Default implementation: sequential evaluation
+        // Derived classes should override this for batch processing
+        std::vector<float> costs;
+        costs.reserve(trajectories.size());
+        
+        for (const auto& traj : trajectories) {
+            costs.push_back(computeCollisionCost(traj));
+        }
+        
+        return costs;
+    }/**
      * @brief Compute the smoothness cost for a given trajectory.
      * 
      * This is the control cost term that penalizes jerky or high-acceleration
