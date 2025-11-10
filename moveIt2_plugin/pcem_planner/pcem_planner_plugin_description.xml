@@ -1,9 +1,0 @@
-<library path="moveit_pcem_planner">
-  <class name="pcem_planner/PCEMPlannerManager"
-         type="pcem_planner::PCEMPlannerManager"
-         base_class_type="planning_interface::PlannerManager">
-    <description>
-      Proximal Cross-Entropy Method (PCEM) trajectory optimizer using MoveIt distance fields
-    </description>
-  </class>
-</library>

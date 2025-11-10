@@ -495,33 +495,3 @@ inline void visualizeOptimizationHistoryToTarget(
 {
     visualizeTrajectoryHistory(target, obstacles, history, true, true);
 }
-
-
-// /**
-//  * @brief Legacy function for backward compatibility
-//  * @deprecated Use showTrajectoryHistoryWindow with ObstacleMap instead
-//  */
-// inline void showPlannerWindow(
-//     const MotionPlanner& planner, 
-//     const std::string& title)
-// {
-//     const std::vector<ObstacleND>& obstacles = planner.getObstacles();
-//     const auto& history = planner.getTrajectoryHistory();
-    
-//     showTrajectoryHistoryWindow(obstacles, history, title, MAP_WIDTH, MAP_HEIGHT);
-// }
-
-
-// /**
-//  * @brief Legacy function for backward compatibility
-//  * @deprecated Use saveTrajectoryHistoryToFile with ObstacleMap instead
-//  */
-// inline bool savePlannerToFile(
-//     const MotionPlanner& planner, 
-//     const std::string& filename)
-// {
-//     const std::vector<ObstacleND>& obstacles = planner.getObstacles();
-//     const auto& history = planner.getTrajectoryHistory();
-    
-//     return saveTrajectoryHistoryToFile(obstacles, history, filename, MAP_WIDTH, MAP_HEIGHT);
-// }
