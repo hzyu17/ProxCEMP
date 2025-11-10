@@ -28,17 +28,15 @@ motion_planning:
 
 pce_planner:
   num_samples: 3000
-  num_iterations: 10
+  num_iterations: 20
   eta: 1.0
   temperature: 1.5
   convergence_threshold: 0.01
 
 ngd_planner:
   num_samples: 3000
-  num_iterations: 10
-  learning_rate: 0.001
+  num_iterations: 20
+  learning_rate: 0.0001
+  temperature: 1.5
   convergence_threshold: 0.01
   
-  cost:
-    epsilon_sdf: 10.0
-    sigma_obs: 1.0
