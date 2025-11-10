@@ -298,37 +298,40 @@ public:
         const size_t D = num_dimensions_;
 
         // Validate trajectory
-        if (N == 0) {
-            std::cerr << "Error: Current trajectory has no nodes!\n";
+        if (N == 0 || current_trajectory_.nodes[0].position.size() != D) {
+            std::cerr << "Error: Invalid trajectory!\n";
             return false;
         }
-        
-        if (current_trajectory_.nodes[0].position.size() != D) {
-            std::cerr << "Error: Dimension mismatch in trajectory!\n";
-            return false;
-        }
-
-        // Compute initial costs
-        float collision_cost = task_->computeCollisionCost(current_trajectory_);
-        float smoothness_cost = computeSmoothnessCost(current_trajectory_);
-        float cost = collision_cost + smoothness_cost;
 
         float alpha = 0.99f;
         float alpha_temp = 1.01f;
 
-        float best_cost = cost;
+        float best_cost = std::numeric_limits<float>::infinity();
         size_t best_iteration = 0;
 
-        storeTrajectory();
+        // Clear history
+        trajectory_history_.clear();
+        
+        // Iteration 0: Evaluate and store initial trajectory
+        {
+            float collision_cost = task_->computeCollisionCost(current_trajectory_);
+            float smoothness_cost = computeSmoothnessCost(current_trajectory_);
+            float cost = collision_cost + smoothness_cost;
+            
+            logf("Iteration 0 (Initial) - Cost: %.2f (Collision: %.4f, Smoothness: %.4f)",
+                cost, collision_cost, smoothness_cost);
+            
+            trajectory_history_.push_back(current_trajectory_);
+            
+            best_cost = cost;
+            best_iteration = 0;
+        }
         
         // Main optimization loop
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
             // Update parameters
-            gamma_ = gamma_ * std::pow(alpha, iteration-1);
+            gamma_ = gamma_ * std::pow(alpha, iteration - 1);
             temperature_ = temperature_ * alpha_temp;
-
-            logf("------- Iteration %zu : Cost = %.2f ------ ", iteration, cost);
-            logf("Collision Cost = %.4f, Smoothness Cost = %.4f", collision_cost, smoothness_cost);
 
             // Extract trajectory as matrix
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
@@ -352,12 +355,10 @@ public:
             
             for (size_t m = 0; m < M; ++m) {
                 Trajectory sample_traj = createPerturbedTrajectory(Y_k, epsilon_samples[m]);
-                
                 if (sample_traj.nodes.size() != N) {
                     std::cerr << "Error: Sample trajectory has wrong size!\n";
                     return false;
                 }
-                
                 sample_trajectories.push_back(sample_traj);
             }
             
@@ -369,10 +370,10 @@ public:
                 return false;
             }
             
-            // Check for invalid costs and fix
+            // Check for invalid costs
             for (size_t m = 0; m < sample_collisions.size(); ++m) {
                 if (!std::isfinite(sample_collisions[m])) {
-                    sample_collisions[m] = 1e6f;  // Large penalty
+                    sample_collisions[m] = 1e6f;
                 }
             }
             
@@ -388,7 +389,6 @@ public:
                 for (size_t d = 0; d < D; ++d) {
                     Eigen::VectorXf epsilon_d = epsilon_samples[m].row(d).transpose();
                     Eigen::VectorXf Y_k_d = Y_k.row(d).transpose();
-                    
                     Eigen::VectorXf R_Y_d = R_matrix_ * Y_k_d;
                     reg_term += epsilon_d.dot(R_Y_d);
                 }
@@ -396,7 +396,7 @@ public:
                 float exponent = -gamma_ * (sample_collision + reg_term) / temperature_;
                 
                 if (!std::isfinite(exponent)) {
-                    exponent = -1e6f;  // Very small weight
+                    exponent = -1e6f;
                 }
 
                 if (exponent > max_exponent) {
@@ -411,7 +411,7 @@ public:
             float weight_sum = weights.sum();
             
             if (!std::isfinite(weight_sum) || weight_sum < 1e-10f) {
-                weights.setConstant(1.0f / M);  // Uniform weights as fallback
+                weights.setConstant(1.0f / M);
             } else {
                 weights /= weight_sum;
             }
@@ -430,43 +430,48 @@ public:
             current_trajectory_.nodes[0].position = start_node_.position;
             current_trajectory_.nodes[N - 1].position = goal_node_.position;
 
-            // Apply task filtering if available
+            // Apply task filtering
             bool filtered = task_->filterTrajectory(current_trajectory_, iteration);
             if (filtered) {
                 log("  Trajectory filtered by task\n");
             }
 
-            log("  Updated trajectory computed.\n");
-            
             // Store trajectory
-            storeTrajectory();
+            trajectory_history_.push_back(current_trajectory_);
 
-            // Recalculate costs
-            collision_cost = task_->computeCollisionCost(current_trajectory_);
-            smoothness_cost = computeSmoothnessCost(current_trajectory_);
-            float new_cost = collision_cost + smoothness_cost;
+            // Compute costs
+            float collision_cost = task_->computeCollisionCost(current_trajectory_);
+            float smoothness_cost = computeSmoothnessCost(current_trajectory_);
+            float cost = collision_cost + smoothness_cost;
+            
+            logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f)",
+                iteration, cost, collision_cost, smoothness_cost);
             
             // Track best trajectory
-            if (new_cost < best_cost) {
-                best_cost = new_cost;
+            if (cost < best_cost) {
+                logf("  New best! (previous: %.2f at iteration %zu)", best_cost, best_iteration);
+                best_cost = cost;
                 best_iteration = iteration;
             }
             
             // Check convergence
-            if (iteration > 1 && std::abs(cost - new_cost) < convergence_threshold_ && cost - new_cost > 0) {
-                log("Cost improvement negligible. Stopping.\n");
-                break;
+            if (iteration > 1) {
+                float prev_cost = task_->computeCollisionCost(trajectory_history_[iteration - 1]) + 
+                                computeSmoothnessCost(trajectory_history_[iteration - 1]);
+                if (std::abs(prev_cost - cost) < convergence_threshold_ && prev_cost - cost > 0) {
+                    log("Cost improvement negligible. Stopping.\n");
+                    break;
+                }
             }
             
-            // Notify task of iteration completion
-            task_->postIteration(iteration, new_cost, current_trajectory_);
-            
-            cost = new_cost;
+            // Notify task
+            task_->postIteration(iteration, cost, current_trajectory_);
         }
 
         // Restore best trajectory
         if (best_iteration < trajectory_history_.size()) {
             current_trajectory_ = trajectory_history_[best_iteration];
+            
             logf("\n*** Restoring best trajectory from iteration %zu with cost %.2f ***", 
                 best_iteration, best_cost);
         }
@@ -475,17 +480,18 @@ public:
         bool success = (best_cost < std::numeric_limits<float>::infinity());
         task_->done(success, num_iterations_, best_cost, current_trajectory_);
         
+        // Final summary
+        float final_collision = task_->computeCollisionCost(current_trajectory_);
+        float final_smoothness = computeSmoothnessCost(current_trajectory_);
+        float final_cost = final_collision + final_smoothness;
+        
         logf("PCEM finished. Final Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
-            task_->computeCollisionCost(current_trajectory_) + computeSmoothnessCost(current_trajectory_),
-            task_->computeCollisionCost(current_trajectory_), 
-            computeSmoothnessCost(current_trajectory_));
+            final_cost, final_collision, final_smoothness);
 
         log("\nLog saved to: " + getLogFilename());
 
         return success;
     }
-
-
 protected:
     
     /**

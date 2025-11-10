@@ -1,0 +1,50 @@
+MoveIt version ..-devel
+Experiment ready_Motion Plan Request 0
+Running on zinuo-7590
+Starting at 2025-11-09T19:46:51.236509
+<<<|
+Motion plan request:
+  planner_id: BKPIECEGood
+  group_name: panda_arm
+  num_planning_attempts: 1
+  allowed_planning_time: 30
+Planning scene:
+  scene_name: /home/zinuo24/Git/motion_bench_maker/problems/table_bars_panda//scene0004.yaml
+  robot_model_name: panda
+|>>>
+0 is the random seed
+30 seconds per run
+-1 MB per run
+1 runs per planner
+28.2755 seconds spent to collect the data
+0 enum types
+2 planners
+RRTConnectkConfigDefault (ompl_rrtc)
+0 common properties
+14 properties for each run
+average_waypoint_distance REAL
+final_path_clearance REAL
+final_path_correct BOOLEAN
+final_path_length REAL
+final_path_smoothness REAL
+final_path_time REAL
+path_plan_clearance REAL
+path_plan_correct BOOLEAN
+path_plan_length REAL
+path_plan_smoothness REAL
+path_plan_time REAL
+process_time REAL
+solved BOOLEAN
+time REAL
+1 runs
+-nan; 0.0831535; true; 12.4696; 0.0692179; 0.0389844; 0.0831535; true; 12.4696; 0.0692179; 0.0389844; 0.0119094; true; 0.0508937; 
+.
+stomp (stomp)
+0 common properties
+3 properties for each run
+average_waypoint_distance REAL
+solved BOOLEAN
+time REAL
+1 runs
+1.79769e+308; false; 28.0995; 
+.
