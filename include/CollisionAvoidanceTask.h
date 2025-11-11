@@ -433,60 +433,6 @@ public:
         }
     }
 
-protected:
-    // /**
-    //  * @brief Precompute the R = A^T * A matrix for smoothness cost
-    //  */
-    // void computeRMatrix(size_t num_nodes, float total_time) {
-    //     float dt = total_time / static_cast<float>(num_nodes - 1);
-    //     float dt_sq = dt * dt;
-    //     float scale = 1.0f / (dt_sq * dt_sq);  // 1/dt^4
-
-    //     R_matrix_.resize(num_nodes, num_nodes);
-    //     R_matrix_.setZero();
-        
-    //     if (num_nodes < 3) {
-    //         return;  // R is zero for N < 3
-    //     }
-
-    //     R_matrix_.reserve(Eigen::VectorXi::Constant(num_nodes, 5));
-    //     std::vector<Eigen::Triplet<float>> triplets;
-
-    //     // Build pentadiagonal matrix R = A^T * A
-    //     // Main diagonal: R[i,i]
-    //     triplets.emplace_back(0, 0, scale * 1.0f);
-    //     triplets.emplace_back(1, 1, scale * 5.0f);
-    //     for (size_t i = 2; i < num_nodes - 2; ++i) {
-    //         triplets.emplace_back(i, i, scale * 6.0f);
-    //     }
-    //     triplets.emplace_back(num_nodes - 2, num_nodes - 2, scale * 5.0f);
-    //     triplets.emplace_back(num_nodes - 1, num_nodes - 1, scale * 1.0f);
-
-    //     // First off-diagonal: R[i,i+1] and R[i+1,i]
-    //     triplets.emplace_back(0, 1, scale * (-2.0f));
-    //     triplets.emplace_back(1, 0, scale * (-2.0f));
-        
-    //     for (size_t i = 1; i < num_nodes - 2; ++i) {
-    //         triplets.emplace_back(i, i + 1, scale * (-4.0f));
-    //         triplets.emplace_back(i + 1, i, scale * (-4.0f));
-    //     }
-        
-    //     triplets.emplace_back(num_nodes - 2, num_nodes - 1, scale * (-2.0f));
-    //     triplets.emplace_back(num_nodes - 1, num_nodes - 2, scale * (-2.0f));
-
-    //     // Second off-diagonal: R[i,i+2] and R[i+2,i]
-    //     triplets.emplace_back(0, 2, scale * 1.0f);
-    //     triplets.emplace_back(2, 0, scale * 1.0f);
-        
-    //     for (size_t i = 1; i < num_nodes - 2; ++i) {
-    //         triplets.emplace_back(i, i + 2, scale * 1.0f);
-    //         triplets.emplace_back(i + 2, i, scale * 1.0f);
-    //     }
-
-    //     R_matrix_.setFromTriplets(triplets.begin(), triplets.end());
-    //     R_matrix_.makeCompressed();
-    // }
-
 private:
     // Obstacle management
     std::shared_ptr<ObstacleMap> obstacle_map_;

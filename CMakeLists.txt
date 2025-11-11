@@ -26,6 +26,7 @@ include(GNUInstallDirs)
 # Install header files
 install(FILES
     include/PCEMotionPlanner.h
+    include/NGDMotionPlanner.h
     include/task.h
     include/Trajectory.h
     include/MotionPlanner.h
