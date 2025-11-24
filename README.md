@@ -103,41 +103,7 @@ make
 ./visualize_noisy_trj              # Visualize smoothness noise distribution
 ```
 
-## Quick Start
-
-### 1. Basic 2D Planning Example
-
-```cpp
-#include <PCEMotionPlanner.h>
-#include <CollisionAvoidanceTask.h>
-#include <yaml-cpp/yaml.h>
-
-int main() {
-    // Load configuration
-    YAML::Node config = YAML::LoadFile("config.yaml");
-    
-    // Create collision avoidance task
-    auto task = std::make_shared<pce::CollisionAvoidanceTask>(config);
-    
-    // Create PCE planner
-    auto planner = std::make_shared<ProximalCrossEntropyMotionPlanner>(task);
-    
-    // Load planner configuration
-    PCEConfig pce_config;
-    pce_config.loadFromFile("config.yaml");
-    
-    // Initialize and solve
-    planner->initialize(pce_config);
-    bool success = planner->solve();
-    
-    // Get optimized trajectory
-    const Trajectory& result = planner->getCurrentTrajectory();
-    
-    return success ? 0 : 1;
-}
-```
-
-### 2. Configuration File Example
+### 1. Configuration File Example
 
 ```yaml
 # config.yaml
@@ -172,7 +138,7 @@ pce_planner:
   convergence_threshold: 0.01
 ```
 
-### 3. Custom Task Implementation
+### 2. Custom Task Implementation
 
 ```cpp
 #include <task.h>
@@ -251,25 +217,6 @@ The `2Dexamples/` directory contains three visualization tools:
    - Shows how sampling noise spreads in workspace
    - Useful for understanding algorithm behavior
 
-### MuJoCo Mobile Manipulator
-
-Plan collision-free trajectories for a 12-DOF mobile manipulator:
-
-```bash
-# Setup environment
-bash setup.sh
-source activate.sh
-
-# 1. Configure start/goal positions
-python config_editor_tkinter.py
-
-# 2. Plan trajectory
-python motion_planner.py
-
-# 3. Visualize result
-python view_trajectory.py
-```
-
 ## Algorithm Details
 
 ### Proximal Cross-Entropy Method (PCE)
@@ -325,38 +272,6 @@ NGD uses the natural gradient of expected cost:
 | `total_time` | Trajectory duration | 10.0 |
 | `node_collision_radius` | Safety margin | 15.0 |
 
-## Testing
-
-Run unit tests to verify deterministic behavior:
-
-```bash
-cd 2Dexamples/build
-make test
-
-# Or run directly
-./test_pcem
-```
-
-Tests verify:
-- Reproducible results with fixed random seeds
-- Consistent obstacle generation
-- Deterministic noise sampling
-- Algorithm convergence
-
-## ROS MoveIt Benchmarking
-
-Compare ProxCEMP against ROS MoveIt planners (OMPL, STOMP, CHOMP):
-
-```bash
-cd Dockers/ROS1MoveIt
-docker build -t moveit-stomp:noetic .
-docker run -it --name moveit_stomp moveit-stomp:noetic
-
-# Inside container
-source /root/catkin_ws/devel/setup.bash
-roslaunch moveit_resources_panda_moveit_config demo.launch pipeline:=stomp
-```
-
 ## Performance Tips
 
 1. **Tune sampling rate**: Start with 1000-3000 samples, increase for complex environments
@@ -368,26 +283,13 @@ roslaunch moveit_resources_panda_moveit_config demo.launch pipeline:=stomp
 
 If you use ProxCEMP in your research, please cite:
 
-```bibtex
-@software{proxcemp2025,
-  title={ProxCEMP: Proximal Cross-Entropy Motion Planning},
-  author={Yu, Hongzhe and others},
-  year={2025},
-  url={https://github.com/hzyu17/ProxCEMP}
-}
+```
+To appear soon.
 ```
 
 ## License
 
-[Add your license here]
-
-## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
+MIT.
 
 ## Related Work
 
@@ -395,12 +297,4 @@ Contributions are welcome! Please:
 - **CHOMP**: Covariant Hamiltonian Optimization for Motion Planning  
 - **TrajOpt**: Sequential Convex Optimization for motion planning
 - **GPMP**: Gaussian Process Motion Planning
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/hzyu17/ProxCEMP/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/hzyu17/ProxCEMP/discussions)
-
-## Acknowledgments
-
-This project builds on research in sampling-based motion planning and trajectory optimization. Special thanks to the robotics community for open-source tools and algorithms.
+- **GVIMP** Gaussian Variational Inference Motion Planning
