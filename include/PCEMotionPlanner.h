@@ -314,7 +314,7 @@ public:
         
         // Iteration 0: Evaluate and store initial trajectory
         {
-            float collision_cost = task_->computeCollisionCost(current_trajectory_);
+            float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
             float smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float cost = collision_cost + smoothness_cost;
             
@@ -363,7 +363,7 @@ public:
             }
             
             // Batch evaluate collision costs
-            std::vector<float> sample_collisions = task_->computeCollisionCost(sample_trajectories);
+            std::vector<float> sample_collisions = task_->computeCollisionCostSimple(sample_trajectories);
             
             if (sample_collisions.size() != M) {
                 std::cerr << "Error: Wrong number of collision costs!\n";
@@ -440,7 +440,7 @@ public:
             trajectory_history_.push_back(current_trajectory_);
 
             // Compute costs
-            float collision_cost = task_->computeCollisionCost(current_trajectory_);
+            float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
             float smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float cost = collision_cost + smoothness_cost;
             
@@ -456,7 +456,7 @@ public:
             
             // Check convergence
             if (iteration > 1) {
-                float prev_cost = task_->computeCollisionCost(trajectory_history_[iteration - 1]) + 
+                float prev_cost = task_->computeCollisionCostSimple(trajectory_history_[iteration - 1]) + 
                                 computeSmoothnessCost(trajectory_history_[iteration - 1]);
                 if (std::abs(prev_cost - cost) < convergence_threshold_ && prev_cost - cost > 0) {
                     log("Cost improvement negligible. Stopping.\n");
@@ -481,7 +481,7 @@ public:
         task_->done(success, num_iterations_, best_cost, current_trajectory_);
         
         // Final summary
-        float final_collision = task_->computeCollisionCost(current_trajectory_);
+        float final_collision = task_->computeCollisionCostSimple(current_trajectory_);
         float final_smoothness = computeSmoothnessCost(current_trajectory_);
         float final_cost = final_collision + final_smoothness;
         

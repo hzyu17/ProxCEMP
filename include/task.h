@@ -48,6 +48,8 @@ public:
      */
     virtual float computeCollisionCost(const Trajectory& trajectory) const = 0;
 
+    virtual float computeCollisionCostSimple(const Trajectory& trajectory) const = 0;
+
     /**
      * @brief Compute collision costs for multiple trajectories (batch processing).
      * 
@@ -74,7 +76,24 @@ public:
         }
         
         return costs;
-    }/**
+    }
+    
+    virtual std::vector<float> computeCollisionCostSimple(
+        const std::vector<Trajectory>& trajectories) const 
+    {
+        // Default implementation: sequential evaluation
+        // Derived classes should override this for batch processing
+        std::vector<float> costs;
+        costs.reserve(trajectories.size());
+        
+        for (const auto& traj : trajectories) {
+            costs.push_back(computeCollisionCostSimple(traj));
+        }
+        
+        return costs;
+    }
+    
+    /**
      * @brief Compute the smoothness cost for a given trajectory.
      * 
      * This is the control cost term that penalizes jerky or high-acceleration

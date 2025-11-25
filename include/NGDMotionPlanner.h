@@ -258,9 +258,9 @@ public:
         return "NGD";
     }
 
-    const std::vector<ObstacleND>& getObstacles() const override {
-        return obstacles_;
-    }
+    // const std::vector<ObstacleND>& getObstacles() const override {
+    //     return obstacles_;
+    // }
 
     const Eigen::SparseMatrix<float>& getRMatrix() const {
         return R_matrix_;
@@ -286,7 +286,7 @@ public:
         storeTrajectory();
         
         // Use task for collision cost computation
-        float collision_cost = task_->computeCollisionCost(current_trajectory_);
+        float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
         float smoothness_cost = computeSmoothnessCost(current_trajectory_);
         float cost = collision_cost + smoothness_cost;
         
@@ -325,7 +325,7 @@ public:
             }
             
             // Batch evaluate collision costs using task
-            std::vector<float> sample_collisions = task_->computeCollisionCost(sample_trajectories);
+            std::vector<float> sample_collisions = task_->computeCollisionCostSimple(sample_trajectories);
             
             if (sample_collisions.size() != M) {
                 std::cerr << "Error: Wrong number of collision costs!\n";
@@ -355,7 +355,7 @@ public:
             storeTrajectory();
             
             // Recalculate costs using task
-            collision_cost = task_->computeCollisionCost(current_trajectory_);
+            collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
             smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float new_cost = collision_cost + smoothness_cost;
 
@@ -386,7 +386,7 @@ public:
         current_trajectory_ = best_trajectory;
         
         // Final cost computation
-        collision_cost = task_->computeCollisionCost(current_trajectory_);
+        collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
         smoothness_cost = computeSmoothnessCost(current_trajectory_);
         
         logf("NGD finished. Best Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
