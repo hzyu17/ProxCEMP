@@ -338,6 +338,8 @@ public:
             natural_gradient /= M;
             
             Eigen::MatrixXf Y_new = (1.0f - learning_rate_) * Y_k - learning_rate_ * natural_gradient;
+            // Eigen::MatrixXf Y_new = Y_k - learning_rate_ * natural_gradient;
+
             updateTrajectoryFromMatrix(Y_new);
 
             // Fix start and goal
