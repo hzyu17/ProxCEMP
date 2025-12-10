@@ -97,7 +97,6 @@ set_target_properties(visualize_collision_checking PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
 )
-
 set_target_properties(visualize_noisy_trj PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON

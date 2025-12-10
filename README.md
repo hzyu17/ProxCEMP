@@ -28,11 +28,6 @@ ProxCEMP provides efficient, gradient-free optimization methods for trajectory p
   - Configurable trajectory discretization
   - Start/goal constraint enforcement
 
-- **Visualization & Analysis**
-  - Real-time SFML-based visualization (2D/3D)
-  - Trajectory history visualization
-  - Collision status indicators
-  - Export to PNG images
 
 ## Installation
 
@@ -102,6 +97,9 @@ make
 ./visualize_collision_checking      # Interactive collision visualization
 ./visualize_noisy_trj              # Visualize smoothness noise distribution
 ```
+<img src="2Dexamples/figures/noise_trj.png" width="350" alt="Noisy Trajectory Samples">
+
+<img src="2Dexamples/figures/pce_anim.gif" width="350" alt="PCE Results">  <img src="2Dexamples/figures/ngd_anim.gif" width="350" alt="NGD Results">
 
 ### 1. Configuration File Example
 

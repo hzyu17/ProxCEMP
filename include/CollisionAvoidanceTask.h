@@ -358,39 +358,10 @@ public:
         return total_cost;
     }
 
-    // /**
-    //  * @brief Compute smoothness cost using R matrix (acceleration minimization)
-    //  */
-    // float computeSmoothnessCost(const Trajectory& trajectory) const override {
-    //     if (trajectory.nodes.empty() || R_matrix_.rows() == 0) {
-    //         return 0.0f;
-    //     }
-
-    //     const size_t N = trajectory.nodes.size();
-    //     const size_t D = num_dimensions_;
-        
-    //     if (N != static_cast<size_t>(R_matrix_.rows())) {
-    //         std::cerr << "Warning: Trajectory size mismatch with R matrix\n";
-    //         return 0.0f;
-    //     }
-
-    //     float total_cost = 0.0f;
-
-    //     // Compute smoothness cost for each dimension
-    //     for (size_t d = 0; d < D; ++d) {
-    //         // Extract positions for dimension d
-    //         Eigen::VectorXf positions(N);
-    //         for (size_t i = 0; i < N; ++i) {
-    //             positions(i) = trajectory.nodes[i].position(d);
-    //         }
-
-    //         // Compute quadratic form: positions^T * R * positions
-    //         Eigen::VectorXf R_pos = R_matrix_ * positions;
-    //         total_cost += positions.dot(R_pos);
-    //     }
-
-    //     return total_cost;
-    // }
+    float computeCollisionCostSimple(const Trajectory& trajectory) const override {
+        // Implement or just delegate to the regular version
+        return computeCollisionCost(trajectory);
+    }
 
     /**
      * @brief Get reference to obstacles (for visualization/debugging)
@@ -405,13 +376,6 @@ public:
     std::shared_ptr<ObstacleMap> getObstacleMap() const {
         return obstacle_map_;
     }
-
-    // /**
-    //  * @brief Get the R matrix used for smoothness cost
-    //  */
-    // const SparseMatrixXf& getRMatrix() const {
-    //     return R_matrix_;
-    // }
 
     /**
      * @brief Set collision cost parameters (can override config values)

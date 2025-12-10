@@ -283,117 +283,118 @@ public:
         const size_t D = num_dimensions_;
         const size_t M = num_samples_;
         
-        storeTrajectory();
+        // Store initial parameters (FIX for compounding decay)
+        const float initial_learning_rate = learning_rate_;
+        const float initial_temperature = temperature_;
+        const float alpha = 0.99f;
+        const float alpha_temp = 1.01f;
         
-        // Use task for collision cost computation
+        // Clear and store initial trajectory
+        trajectory_history_.clear();
+        trajectory_history_.push_back(current_trajectory_);
+        
+        // Iteration 0: Log initial cost (CONSISTENT WITH PCE)
         float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
         float smoothness_cost = computeSmoothnessCost(current_trajectory_);
         float cost = collision_cost + smoothness_cost;
         
-        const float alpha = 0.99f;
-        const float alpha_temp = 1.01f;
+        logf("Iteration 0 (Initial) - Cost: %.2f (Collision: %.4f, Smoothness: %.4f)",
+            cost, collision_cost, smoothness_cost);
+        
         float best_cost = cost;
         Trajectory best_trajectory = current_trajectory_;
+        size_t best_iteration = 0;
 
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
-            // Update parameters
-            learning_rate_ = learning_rate_ * std::pow(alpha, iteration - 1);
-            temperature_ = temperature_ * alpha_temp;
+            // FIX: Use initial values with proper decay
+            float current_lr = initial_learning_rate * std::pow(alpha, iteration - 1);
+            float current_temp = initial_temperature * std::pow(alpha_temp, iteration - 1);
             
-            logf("------- Iteration %zu : Cost = %.2f ------ ", iteration, cost);
-            logf("  Collision: %.4f, Smoothness: %.4f, LR: %.6f, Temp: %.4f", 
-                collision_cost, smoothness_cost, learning_rate_, temperature_);
-                    
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
             std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
             
             Eigen::MatrixXf natural_gradient = Eigen::MatrixXf::Zero(D, N);
             
-            // Create perturbed trajectories for batch evaluation
+            // Create perturbed trajectories
             std::vector<Trajectory> sample_trajectories;
             sample_trajectories.reserve(M);
             
             for (size_t m = 0; m < M; ++m) {
                 Trajectory sample_traj = createPerturbedTrajectory(Y_k, epsilon_samples[m]);
-                
-                if (sample_traj.nodes.size() != N) {
-                    std::cerr << "Error: Sample trajectory has wrong size!\n";
-                    return false;
-                }
-                
                 sample_trajectories.push_back(sample_traj);
             }
             
-            // Batch evaluate collision costs using task
+            // Batch evaluate
             std::vector<float> sample_collisions = task_->computeCollisionCostSimple(sample_trajectories);
             
-            if (sample_collisions.size() != M) {
-                std::cerr << "Error: Wrong number of collision costs!\n";
-                return false;
-            }
-            
-            // Check for invalid costs and fix
+            // Fix invalid costs
             for (size_t m = 0; m < sample_collisions.size(); ++m) {
                 if (!std::isfinite(sample_collisions[m])) {
-                    sample_collisions[m] = 1e6f;  // Large penalty
+                    sample_collisions[m] = 1e6f;
                 }
             }
             
             // Compute natural gradient with temperature scaling
             for (size_t m = 0; m < M; ++m) {
-                natural_gradient += (sample_collisions[m] / temperature_) * epsilon_samples[m];
+                natural_gradient += (sample_collisions[m] / current_temp) * epsilon_samples[m];
             }
-            natural_gradient /= M;
+            natural_gradient /= static_cast<float>(M);
             
-            Eigen::MatrixXf Y_new = (1.0f - learning_rate_) * Y_k - learning_rate_ * natural_gradient;
-            // Eigen::MatrixXf Y_new = Y_k - learning_rate_ * natural_gradient;
-
+            // Update
+            Eigen::MatrixXf Y_new = (1.0f - current_lr) * Y_k - current_lr * natural_gradient;
+            
             updateTrajectoryFromMatrix(Y_new);
-
+            
+            // Fix endpoints
             current_trajectory_.nodes[0].position = start_node_.position;
             current_trajectory_.nodes[N - 1].position = goal_node_.position;
-
-            storeTrajectory();
             
-            // Recalculate costs using task
+            // Store trajectory
+            trajectory_history_.push_back(current_trajectory_);
+            
+            // Compute new cost
             collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
             smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float new_cost = collision_cost + smoothness_cost;
-
-            logf("  New Cost = %.2f (Δ = %.2f)", new_cost, cost - new_cost);
+            
+            logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f) LR: %.6f, Temp: %.4f",
+                iteration, new_cost, collision_cost, smoothness_cost, current_lr, current_temp);
             
             if (new_cost < best_cost) {
+                logf("  New best! (previous: %.2f at iteration %zu)", best_cost, best_iteration);
                 best_cost = new_cost;
                 best_trajectory = current_trajectory_;
+                best_iteration = iteration;
             }
             
+            // Check divergence
             if (std::isnan(new_cost) || std::isinf(new_cost) || new_cost > 1e10) {
                 log("WARNING: Optimization diverged! Restoring best trajectory.");
                 current_trajectory_ = best_trajectory;
                 break;
             }
             
+            // Check convergence
             if (iteration > 1 && std::abs(cost - new_cost) < convergence_threshold_) {
                 log("Converged!");
                 break;
             }
             
-            // Notify task of iteration completion
             task_->postIteration(iteration, new_cost, current_trajectory_);
-            
             cost = new_cost;
         }
         
+        // Restore best
         current_trajectory_ = best_trajectory;
         
-        // Final cost computation
         collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
         smoothness_cost = computeSmoothnessCost(current_trajectory_);
         
-        logf("NGD finished. Best Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
+        logf("\n*** Restoring best trajectory from iteration %zu with cost %.2f ***",
+            best_iteration, best_cost);
+        logf("NGD finished. Final Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
             best_cost, collision_cost, smoothness_cost);
         
-        // Notify task of completion
         bool success = (best_cost < std::numeric_limits<float>::infinity());
         task_->done(success, num_iterations_, best_cost, current_trajectory_);
         
@@ -401,8 +402,6 @@ public:
         
         return success;
     }
-
-
 protected:
     /**
      * @brief Initialize task with trajectory parameters

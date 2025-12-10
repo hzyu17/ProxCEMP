@@ -365,14 +365,6 @@ public:
         return std::numeric_limits<float>::infinity();
     }
 
-    // /**
-    //  * @brief Computes the L2-norm squared smoothness cost for N-dimensional trajectories.
-    //  * Equivalent to sum over all dimensions: Σ_d (X_d^T A^T A X_d)
-    //  * @return The total smoothness cost (non-negative).
-    //  */
-    // float computeSmoothnessCost() const {
-    //     return computeSmoothnessCost(current_trajectory_);
-    // }
 
     float computeSmoothnessCost(const Trajectory& traj) const {
         const size_t N = traj.nodes.size();

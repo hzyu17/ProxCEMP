@@ -93,26 +93,6 @@ public:
         return costs;
     }
     
-    /**
-     * @brief Compute the smoothness cost for a given trajectory.
-     * 
-     * This is the control cost term that penalizes jerky or high-acceleration
-     * motions, encouraging smooth trajectories.
-     * 
-     * @param trajectory The trajectory to evaluate
-     * @return The smoothness cost (lower = smoother)
-     */
-    // virtual float computeSmoothnessCost(const Trajectory& trajectory) const = 0;
-
-    // /**
-    //  * @brief Compute the total cost (collision + smoothness).
-    //  * 
-    //  * @param trajectory The trajectory to evaluate
-    //  * @return The total cost
-    //  */
-    // virtual float computeTotalCost(const Trajectory& trajectory) const {
-    //     return computeCollisionCost(trajectory) + computeSmoothnessCost(trajectory);
-    // }
 
     /**
      * @brief Filter a trajectory to satisfy constraints (e.g., joint limits).
