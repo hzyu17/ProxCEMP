@@ -97,10 +97,20 @@ make
 ./visualize_collision_checking      # Interactive collision visualization
 ./visualize_noisy_trj              # Visualize smoothness noise distribution
 ```
+<p style="text-align:center;">
 <img src="2Dexamples/figures/noise_trj.png" width="350" alt="Noisy Trajectory Samples">
+</p>
 
-<img src="2Dexamples/figures/pce_anim.gif" width="350" alt="PCE Results">  <img src="2Dexamples/figures/ngd_anim.gif" width="350" alt="NGD Results">
+<p style="text-align:center;">
+<img src="2Dexamples/figures/pce_optimization_cost_convergence.png" width="350" alt="PCE Costs">
+<img src="2Dexamples/figures/ngd_optimization_cost_convergence.png" width="350" alt="NGD Costs">
+</p>
 
+<p style="text-align:center;">
+<img src="2Dexamples/figures/pce_anim.gif" width="350" alt="PCE Results">
+<img src="2Dexamples/figures/ngd_anim.gif" width="350" alt="NGD Results">
+</p>
+  
 ### 1. Configuration File Example
 
 ```yaml
