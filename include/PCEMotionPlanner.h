@@ -41,266 +41,106 @@ struct PCEConfig : public MotionPlannerConfig {
     size_t num_samples = 3000;
     size_t num_iterations = 10;
     float eta = 1.0f;
-    float temperature = 1.5f;
+    float temperature = 1.5f;       // T_initial
+    float temperature_final = 0.1f; // Added: T_final for scheduling
     float convergence_threshold = 0.01f;
     float collision_clearance = 0.1f;
     float collision_threshold = 0.1f;
     
-    // Derived parameter (computed from eta and temperature)
-    float gamma = 0.5f;
+    // Updated fixed gamma calculation
+    float gamma = 0.5f; 
+
+    // Elite portion
+    float elite_ratio = 0.1f;
     
     // === Covariance Scheduling Parameters ===
     CovarianceSchedule cov_schedule = CovarianceSchedule::COSINE;
-    float cov_scale_initial = 1.0f;      // Initial covariance scale (σ_init)
-    float cov_scale_final = 0.1f;        // Final covariance scale (σ_final)
-    float cov_decay_rate = 0.9f;         // Decay rate for exponential schedule (α)
-    size_t cov_step_interval = 3;        // Interval for step schedule
-    float cov_step_factor = 0.5f;        // Reduction factor for step schedule
-    float cov_adaptive_threshold = 0.05f; // Cost improvement threshold for adaptive
+    float cov_scale_initial = 1.0f;
+    float cov_scale_final = 0.01f;
+    float cov_decay_rate = 0.9f;
+    size_t cov_step_interval = 3;
+    float cov_step_factor = 0.5f;
+    float cov_adaptive_threshold = 0.05f;
     
     // === EMA ===
-    float ema_alpha = 0.5f; // 1.0 = no EMA (standard PCE), 0.1 = heavy smoothing
+    float ema_alpha = 0.5f;
 
-
-    /**
-     * @brief Load PCE-specific configuration from YAML node
-     * @param config YAML node containing configuration
-     * @return true if loading successful
-     */
     bool loadFromYAML(const YAML::Node& config) override {
-        // First load base configuration
-        if (!MotionPlannerConfig::loadFromYAML(config)) {
-            return false;
-        }
+        if (!MotionPlannerConfig::loadFromYAML(config)) return false;
         
         try {
-            // Load PCE-specific parameters
             if (config["pce_planner"]) {
                 const YAML::Node& pce = config["pce_planner"];
                 
-                if (pce["num_samples"]) {
-                    num_samples = pce["num_samples"].as<size_t>();
-                }
-                if (pce["num_iterations"]) {
-                    num_iterations = pce["num_iterations"].as<size_t>();
-                }
+                if (pce["num_samples"]) num_samples = pce["num_samples"].as<size_t>();
+                if (pce["num_iterations"]) num_iterations = pce["num_iterations"].as<size_t>();
                 if (pce["eta"]) {
                     eta = pce["eta"].as<float>();
-                }
-                if (pce["temperature"]) {
-                    temperature = pce["temperature"].as<float>();
-                }
-                if (pce["convergence_threshold"]) {
-                    convergence_threshold = pce["convergence_threshold"].as<float>();
-                }
-                if (pce["collision_clearance"]) {
-                    collision_clearance = pce["collision_clearance"].as<float>();
-                }
-                if (pce["collision_threshold"]) {
-                    collision_threshold = pce["collision_threshold"].as<float>();
+                    // Apply your fixed formulation: gamma = eta / (eta + 1)
+                    gamma = eta / (eta + 1.0f);
                 }
                 
-                // Compute gamma from eta and temperature
-                if (temperature > 0.0f) {
-                    gamma = eta / temperature;
+                if (pce["temperature"]) temperature = pce["temperature"].as<float>();
+                if (pce["temperature_final"]) {
+                    temperature_final = pce["temperature_final"].as<float>();
+                } else {
+                    temperature_final = temperature; // Default to constant temp
                 }
+
+                if (pce["convergence_threshold"]) convergence_threshold = pce["convergence_threshold"].as<float>();
+                if (pce["elite_ratio"]) elite_ratio = pce["elite_ratio"].as<float>();
+                if (pce["ema_alpha"]) ema_alpha = pce["ema_alpha"].as<float>();
+                if (pce["collision_clearance"]) collision_clearance = pce["collision_clearance"].as<float>();
+                if (pce["collision_threshold"]) collision_threshold = pce["collision_threshold"].as<float>();
                 
-                // === Load covariance scheduling parameters ===
+                // Covariance Schedule
                 if (pce["covariance_schedule"]) {
-                    std::string schedule_str = pce["covariance_schedule"].as<std::string>();
-                    if (schedule_str == "constant") {
-                        cov_schedule = CovarianceSchedule::CONSTANT;
-                    } else if (schedule_str == "linear") {
-                        cov_schedule = CovarianceSchedule::LINEAR;
-                    } else if (schedule_str == "exponential") {
-                        cov_schedule = CovarianceSchedule::EXPONENTIAL;
-                    } else if (schedule_str == "cosine") {
-                        cov_schedule = CovarianceSchedule::COSINE;
-                    } else if (schedule_str == "step") {
-                        cov_schedule = CovarianceSchedule::STEP;
-                    } else if (schedule_str == "adaptive") {
-                        cov_schedule = CovarianceSchedule::ADAPTIVE;
-                    } else {
-                        std::cerr << "Warning: Unknown covariance schedule '" << schedule_str 
-                                  << "', using exponential\n";
-                        cov_schedule = CovarianceSchedule::EXPONENTIAL;
-                    }
+                    std::string s = pce["covariance_schedule"].as<std::string>();
+                    if (s == "constant") cov_schedule = CovarianceSchedule::CONSTANT;
+                    else if (s == "linear") cov_schedule = CovarianceSchedule::LINEAR;
+                    else if (s == "exponential") cov_schedule = CovarianceSchedule::EXPONENTIAL;
+                    else if (s == "cosine") cov_schedule = CovarianceSchedule::COSINE;
+                    else if (s == "step") cov_schedule = CovarianceSchedule::STEP;
+                    else if (s == "adaptive") cov_schedule = CovarianceSchedule::ADAPTIVE;
                 }
                 
-                if (pce["cov_scale_initial"]) {
-                    cov_scale_initial = pce["cov_scale_initial"].as<float>();
-                }
-                if (pce["cov_scale_final"]) {
-                    cov_scale_final = pce["cov_scale_final"].as<float>();
-                }
-                if (pce["cov_decay_rate"]) {
-                    cov_decay_rate = pce["cov_decay_rate"].as<float>();
-                }
-                if (pce["cov_step_interval"]) {
-                    cov_step_interval = pce["cov_step_interval"].as<size_t>();
-                }
-                if (pce["cov_step_factor"]) {
-                    cov_step_factor = pce["cov_step_factor"].as<float>();
-                }
-                if (pce["cov_adaptive_threshold"]) {
-                    cov_adaptive_threshold = pce["cov_adaptive_threshold"].as<float>();
-                }
-
-                if (pce["ema_alpha"]) {
-                    ema_alpha = pce["ema_alpha"].as<float>();
-                }
+                if (pce["cov_scale_initial"]) cov_scale_initial = pce["cov_scale_initial"].as<float>();
+                if (pce["cov_scale_final"])   cov_scale_final = pce["cov_scale_final"].as<float>();
+                if (pce["cov_decay_rate"])    cov_decay_rate = pce["cov_decay_rate"].as<float>();
+                if (pce["cov_step_interval"]) cov_step_interval = pce["cov_step_interval"].as<size_t>();
+                if (pce["cov_step_factor"])   cov_step_factor = pce["cov_step_factor"].as<float>();
             }
-
-            print();
-            
             return validate();
-            
         } catch (const std::exception& e) {
-            std::cerr << "Error loading PCE config from YAML: " << e.what() << "\n";
+            std::cerr << "Error loading PCE config: " << e.what() << "\n";
             return false;
         }
     }
-    
-    /**
-     * @brief Validate PCE configuration parameters
-     * @return true if configuration is valid
-     */
-    bool validate() const override {
-        // Validate base configuration first
-        if (!MotionPlannerConfig::validate()) {
-            return false;
-        }
 
-        if (ema_alpha <= 0.0f || ema_alpha > 1.0f) {
-            std::cerr << "Error: ema_alpha must be in (0, 1]\n";
-            return false;
-        }
-        
-        // Validate PCE-specific parameters
-        if (num_samples == 0) {
-            std::cerr << "Error: num_samples must be > 0\n";
-            return false;
-        }
-        
-        if (num_iterations == 0) {
-            std::cerr << "Error: num_iterations must be > 0\n";
-            return false;
-        }
-        
-        if (temperature <= 0.0f) {
-            std::cerr << "Error: temperature must be positive\n";
-            return false;
-        }
-        
-        if (eta < 0.0f) {
-            std::cerr << "Error: eta must be non-negative\n";
-            return false;
-        }
-        
-        if (convergence_threshold < 0.0f) {
-            std::cerr << "Error: convergence_threshold must be non-negative\n";
-            return false;
-        }
-
-        if (collision_clearance < 0.0f) {
-            std::cerr << "Error: collision_clearance must be non-negative\n";
-            return false;
-        }
-
-        if (collision_threshold < 0.0f) {
-            std::cerr << "Error: collision_threshold must be non-negative\n";
-            return false;
-        }
-        
-        // Validate covariance scheduling parameters
-        if (cov_scale_initial <= 0.0f) {
-            std::cerr << "Error: cov_scale_initial must be positive\n";
-            return false;
-        }
-        
-        if (cov_scale_final < 0.0f) {
-            std::cerr << "Error: cov_scale_final must be non-negative\n";
-            return false;
-        }
-        
-        if (cov_scale_final > cov_scale_initial) {
-            std::cerr << "Warning: cov_scale_final > cov_scale_initial (covariance will increase)\n";
-        }
-        
-        if (cov_decay_rate <= 0.0f || cov_decay_rate > 1.0f) {
-            std::cerr << "Error: cov_decay_rate must be in (0, 1]\n";
-            return false;
-        }
-        
-        return true;
+    void print() const override {
+        MotionPlannerConfig::print();
+        std::cout << "--- PCE Hyperparameters (Updated) ---\n";
+        std::cout << "  Eta:         " << eta << " (Fixed Gamma: " << gamma << ")\n";
+        std::cout << "  Temperature: " << temperature << " -> " << temperature_final << "\n";
+        std::cout << "  Elite Ratio: " << elite_ratio << "\n";
+        std::cout << "  EMA Alpha:   " << ema_alpha << "\n";
+        std::cout << "  Cov Scale:   " << cov_scale_initial << " -> " << cov_scale_final << "\n";
     }
-    
-    /**
-     * @brief Get schedule name as string
-     */
+
+
     std::string getScheduleName() const {
         switch (cov_schedule) {
-            case CovarianceSchedule::CONSTANT: return "constant";
-            case CovarianceSchedule::LINEAR: return "linear";
+            case CovarianceSchedule::CONSTANT:    return "constant";
+            case CovarianceSchedule::LINEAR:      return "linear";
             case CovarianceSchedule::EXPONENTIAL: return "exponential";
-            case CovarianceSchedule::COSINE: return "cosine";
-            case CovarianceSchedule::STEP: return "step";
-            case CovarianceSchedule::ADAPTIVE: return "adaptive";
-            default: return "unknown";
+            case CovarianceSchedule::COSINE:      return "cosine";
+            case CovarianceSchedule::STEP:        return "step";
+            case CovarianceSchedule::ADAPTIVE:    return "adaptive";
+            default:                              return "unknown";
         }
     }
-    
-    /**
-     * @brief Print PCE configuration to console
-     */
-    void print() const override {
-        // Print base configuration
-        MotionPlannerConfig::print();
-        
-        // Print PCE-specific parameters
-        std::cout << "=== PCE Planner Configuration ===\n";
-        std::cout << "Algorithm:              Proximal Cross-Entropy Method\n";
-        std::cout << "Number of samples:      " << num_samples << "\n";
-        std::cout << "Number of iterations:   " << num_iterations << "\n";
-        std::cout << "Initial temperature:    " << temperature << "\n";
-        std::cout << "Temperature scaling:    1.01 (alpha_temp)\n";
-        std::cout << "Initial eta:            " << eta << "\n";
-        std::cout << "Initial gamma:          " << gamma << "\n";
-        std::cout << "Gamma decay:            0.99 (alpha)\n";
-        std::cout << "Convergence threshold:  " << convergence_threshold << "\n";
-        std::cout << "Collision clearance:    " << collision_clearance << "\n";
-        std::cout << "Collision threshold:    " << collision_threshold << "\n";
-        std::cout << "\n";
-        
-        // Print covariance scheduling parameters
-        std::cout << "=== Covariance Scheduling ===\n";
-        std::cout << "Schedule type:          " << getScheduleName() << "\n";
-        std::cout << "Initial scale (σ_init): " << cov_scale_initial << "\n";
-        std::cout << "Final scale (σ_final):  " << cov_scale_final << "\n";
-        
-        switch (cov_schedule) {
-            case CovarianceSchedule::EXPONENTIAL:
-                std::cout << "Decay rate (α):         " << cov_decay_rate << "\n";
-                std::cout << "Formula: σ(t) = σ_init * α^t\n";
-                break;
-            case CovarianceSchedule::LINEAR:
-                std::cout << "Formula: σ(t) = σ_init + (σ_final - σ_init) * t/T\n";
-                break;
-            case CovarianceSchedule::COSINE:
-                std::cout << "Formula: σ(t) = σ_final + 0.5*(σ_init - σ_final)*(1 + cos(πt/T))\n";
-                break;
-            case CovarianceSchedule::STEP:
-                std::cout << "Step interval:          " << cov_step_interval << "\n";
-                std::cout << "Step factor:            " << cov_step_factor << "\n";
-                break;
-            case CovarianceSchedule::ADAPTIVE:
-                std::cout << "Improvement threshold:  " << cov_adaptive_threshold << "\n";
-                break;
-            default:
-                break;
-        }
-        std::cout << "\n";
-    }
+
+
 };
 
 
@@ -382,6 +222,9 @@ public:
         
         // Initialize current covariance scale
         cov_scale_current_ = cov_scale_initial_;
+
+        // Elite ratio
+        elite_ratio_ = config.elite_ratio;
 
         // EMA schedule parameter
         ema_alpha_ = config.ema_alpha;
@@ -554,235 +397,132 @@ public:
             return false;
         }
 
-        log("\n--- Starting PCEM Optimization ---\n");
-        log("Update Rule: Y_{k+1} = Σ w_m (Y_k + σ_k * ε_m)\n");
-        log("  where ε_m ~ N(0, R⁻¹) samples from smoothness prior\n");
-        log("  and σ_k is the covariance scale at iteration k\n");
-        logf("Covariance Schedule: %s (σ_init=%.3f → σ_final=%.3f)\n\n",
-             pce_config_->getScheduleName().c_str(), cov_scale_initial_, cov_scale_final_);
-        
         const size_t N = current_trajectory_.nodes.size();
         const size_t M = num_samples_;
         const size_t D = num_dimensions_;
-
-        // Validate trajectory
-        if (N == 0 || current_trajectory_.nodes[0].position.size() != D) {
-            std::cerr << "Error: Invalid trajectory!\n";
-            return false;
-        }
-
-        float alpha = 0.99f;
+        float alpha_decay = 0.99f;
         float alpha_temp = 1.01f;
 
         float best_cost = std::numeric_limits<float>::infinity();
         size_t best_iteration = 0;
-        
-        // Reset covariance scale
-        cov_scale_current_ = cov_scale_initial_;
+        float prev_cost = std::numeric_limits<float>::infinity();
 
-        // Clear history
+        // Reset history
         trajectory_history_.clear();
         covariance_scale_history_.clear();
-        
-        // Iteration 0: Evaluate and store initial trajectory
-        float prev_cost = 0.0f;
-        {
-            float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
-            float smoothness_cost = computeSmoothnessCost(current_trajectory_);
-            float cost = collision_cost + smoothness_cost;
-            
-            logf("Iter 0 (Init) - Cost: %.2f (Coll: %.4f, Smooth: %.4f), σ=%.4f",
-                cost, collision_cost, smoothness_cost, cov_scale_current_);
-            
-            trajectory_history_.push_back(current_trajectory_);
-            covariance_scale_history_.push_back(cov_scale_current_);
-            
-            best_cost = cost;
-            best_iteration = 0;
-            prev_cost = cost;
-        }
-        
-        // Main optimization loop
+
+        gamma_ = pce_config_->gamma;
+
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
-            // Update parameters
-            gamma_ = gamma_ * std::pow(alpha, iteration - 1);
-            temperature_ = temperature_ * alpha_temp;
-
-            // Extract trajectory as matrix
+            // 1. Update hyperparameters
+            // gamma_ = gamma_ * std::pow(alpha_decay, iteration - 1);
+            // temperature_ = temperature_ * alpha_temp;
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
-            
-            if (Y_k.rows() != static_cast<long>(D) || Y_k.cols() != static_cast<long>(N)) {
-                std::cerr << "Error: Matrix size mismatch!\n";
-                return false;
-            }
 
-            // Sample noise matrices with current covariance scale
-            // ε ~ N(0, σ² * R⁻¹) - scaled structured noise
+            // 2. Sampling and Evaluation
             std::vector<Eigen::MatrixXf> epsilon_samples = sampleScaledNoiseMatrices(M, cov_scale_current_);
-            
-            if (epsilon_samples.size() != M) {
-                std::cerr << "Error: Wrong number of noise matrices!\n";
-                return false;
-            }
-            
-            // Create perturbed trajectories
             std::vector<Trajectory> sample_trajectories;
             sample_trajectories.reserve(M);
             
             for (size_t m = 0; m < M; ++m) {
-                Trajectory sample_traj = createPerturbedTrajectory(Y_k, epsilon_samples[m]);
-                if (sample_traj.nodes.size() != N) {
-                    std::cerr << "Error: Sample trajectory has wrong size!\n";
-                    return false;
-                }
-                sample_trajectories.push_back(sample_traj);
+                sample_trajectories.push_back(createPerturbedTrajectory(Y_k, epsilon_samples[m]));
             }
             
-            // Batch evaluate collision costs
             std::vector<float> sample_collisions = task_->computeCollisionCostSimple(sample_trajectories);
-            
-            if (sample_collisions.size() != M) {
-                std::cerr << "Error: Wrong number of collision costs!\n";
-                return false;
-            }
-            
-            // Check for invalid costs
-            for (size_t m = 0; m < sample_collisions.size(); ++m) {
-                if (!std::isfinite(sample_collisions[m])) {
-                    sample_collisions[m] = 1e6f;
-                }
-            }
-            
-            // Compute weights
-            Eigen::VectorXf weights(M);
-            float max_exponent = -std::numeric_limits<float>::infinity();
 
-            for (size_t m = 0; m < M; ++m) {
-                float sample_collision = sample_collisions[m];
+            // 3. Elite Selection
+            std::vector<size_t> indices(M);
+            std::iota(indices.begin(), indices.end(), 0);
+            std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+                return sample_collisions[a] < sample_collisions[b];
+            });
+
+            const size_t num_elites = std::max(static_cast<size_t>(1), static_cast<size_t>(M * elite_ratio_));
+            
+            // Find cost range for adaptive sharpening
+            float min_elite_cost = sample_collisions[indices[0]];
+            float max_elite_cost = sample_collisions[indices[num_elites - 1]];
+            float cost_range = max_elite_cost - min_elite_cost;
+
+            // 4. Adaptive Weight Sharpening
+            Eigen::VectorXf weights = Eigen::VectorXf::Zero(M);
+            float max_exponent = -std::numeric_limits<float>::infinity();
+            
+            // We use a sensitivity factor (kappa) to prevent the temperature from blowing up
+            // If cost_range is small, we stay with the base temperature. 
+            // If cost_range is huge, we scale the temperature up to avoid "Winner-Takes-All" collapse.
+            float adaptive_temp = temperature_ * (1.0f + 0.5f * cost_range);
+
+            for (size_t i = 0; i < num_elites; ++i) {
+                size_t m = indices[i];
                 
-                // Regularization term per dimension
                 float reg_term = 0.0f;
                 for (size_t d = 0; d < D; ++d) {
-                    Eigen::VectorXf epsilon_d = epsilon_samples[m].row(d).transpose();
-                    Eigen::VectorXf Y_k_d = Y_k.row(d).transpose();
-                    Eigen::VectorXf R_Y_d = R_matrix_ * Y_k_d;
-                    reg_term += epsilon_d.dot(R_Y_d);
+                    reg_term += epsilon_samples[m].row(d).dot(R_matrix_ * Y_k.row(d).transpose());
                 }
 
-                float exponent = -gamma_ * (sample_collision + reg_term) / temperature_;
-                
-                if (!std::isfinite(exponent)) {
-                    exponent = -1e6f;
-                }
-
-                if (exponent > max_exponent) {
-                    max_exponent = exponent;
-                }
-                
+                // Raw exponent
+                float exponent = -gamma_ * (sample_collisions[m] + reg_term);
                 weights(m) = exponent;
+                if (exponent > max_exponent) max_exponent = exponent;
             }
-            
-            // Normalize weights
-            weights = (weights.array() - max_exponent).exp();
-            float weight_sum = weights.sum();
-            
-            if (!std::isfinite(weight_sum) || weight_sum < 1e-10f) {
-                weights.setConstant(1.0f / M);
-            } else {
-                weights /= weight_sum;
+
+            // 5. Normalized Softmax with Adaptive Temp
+            float weight_sum = 0.0f;
+            for (size_t i = 0; i < num_elites; ++i) {
+                size_t m = indices[i];
+                weights(m) = std::exp((weights(m) - max_exponent) / adaptive_temp);
+                weight_sum += weights(m);
             }
-            
-            // 1. Compute Y_{k+1} via weighted mean update
+            weights /= (weight_sum + 1e-10f);
+
+            // 6. EMA Update Rule
             MatrixXf Y_weighted = MatrixXf::Zero(D, N);
-
-            for (size_t m = 0; m < M; ++m) {
-                Eigen::MatrixXf temp = Y_k + epsilon_samples[m];
-                Y_weighted += weights(m) * temp; // EMA updates
+            for (size_t i = 0; i < num_elites; ++i) {
+                size_t m = indices[i];
+                Y_weighted += weights(m) * (Y_k + epsilon_samples[m]);
             }
 
-            // 2. Apply EMA Update: Y_{k+1} = (1 - α) * Y_k + α * Y_weighted
-            // This acts as an adaptive step size.
+            // Apply Exponential Moving Average: Y_new = (1-a)Y_k + a*Y_target
             MatrixXf Y_new = (1.0f - ema_alpha_) * Y_k + ema_alpha_ * Y_weighted;
-            
             updateTrajectoryFromMatrix(Y_new);
 
-            // Fix start and goal
+            // 7. Cleanup & Constraints
             current_trajectory_.nodes[0].position = start_node_.position;
             current_trajectory_.nodes[N - 1].position = goal_node_.position;
+            task_->filterTrajectory(current_trajectory_, iteration);
 
-            // Apply task filtering
-            bool filtered = task_->filterTrajectory(current_trajectory_, iteration);
-            if (filtered) {
-                log("  Trajectory filtered by task\n");
-            }
+            // 8. Logging and Convergence
+            float current_collision = task_->computeCollisionCostSimple(current_trajectory_);
+            float current_smoothness = computeSmoothnessCost(current_trajectory_);
+            float current_total_cost = current_collision + current_smoothness;
 
-            // Store trajectory
             trajectory_history_.push_back(current_trajectory_);
             covariance_scale_history_.push_back(cov_scale_current_);
 
-            // Compute costs
-            float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
-            float smoothness_cost = computeSmoothnessCost(current_trajectory_);
-            float cost = collision_cost + smoothness_cost;
-            
-            logf("Iter %2zu - Cost: %.2f (Coll: %.4f, Smooth: %.4f), σ=%.4f",
-                iteration, cost, collision_cost, smoothness_cost, cov_scale_current_);
-            
-            // Track best trajectory
-            if (cost < best_cost) {
-                logf("  New best! (previous: %.2f at iteration %zu)", best_cost, best_iteration);
-                best_cost = cost;
+            if (current_total_cost < best_cost) {
+                best_cost = current_total_cost;
                 best_iteration = iteration;
             }
+
+            logf("Iter %zu: Cost=%.3f (Sharpening Temp: %.3f), σ=%.4f", 
+                iteration, current_total_cost, adaptive_temp, cov_scale_current_);
+
+            // Update covariance for next iteration
+            cov_scale_current_ = computeCovarianceScale(iteration + 1, prev_cost, current_total_cost);
             
-            // Update covariance scale for next iteration
-            cov_scale_current_ = computeCovarianceScale(iteration + 1, prev_cost, cost);
+            if (std::abs(prev_cost - current_total_cost) < convergence_threshold_) break;
+            prev_cost = current_total_cost;
             
-            // Check convergence
-            if (iteration > 1) {
-                if (std::abs(prev_cost - cost) < convergence_threshold_ && prev_cost - cost > 0) {
-                    log("Cost improvement negligible. Stopping.\n");
-                    break;
-                }
-            }
-            
-            prev_cost = cost;
-            
-            // Notify task
-            task_->postIteration(iteration, cost, current_trajectory_);
+            task_->postIteration(iteration, current_total_cost, current_trajectory_);
         }
 
-        // Restore best trajectory
-        if (best_iteration < trajectory_history_.size()) {
-            current_trajectory_ = trajectory_history_[best_iteration];
-            
-            logf("\n*** Restoring best trajectory from iteration %zu with cost %.2f ***", 
-                best_iteration, best_cost);
-        }
-        
-        // Notify task of completion
-        bool success = (best_cost < std::numeric_limits<float>::infinity());
-        task_->done(success, num_iterations_, best_cost, current_trajectory_);
-        
-        // Final summary
-        float final_collision = task_->computeCollisionCostSimple(current_trajectory_);
-        float final_smoothness = computeSmoothnessCost(current_trajectory_);
-        float final_cost = final_collision + final_smoothness;
-        
-        logf("PCEM finished. Final Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
-            final_cost, final_collision, final_smoothness);
-        
-        // Log covariance schedule summary
-        log("\nCovariance Schedule History:");
-        for (size_t i = 0; i < covariance_scale_history_.size(); ++i) {
-            logf("  Iter %zu: σ = %.4f", i, covariance_scale_history_[i]);
-        }
+        // Finalize
+        current_trajectory_ = trajectory_history_[best_iteration];
+        task_->done(true, num_iterations_, best_cost, current_trajectory_);
+        return true;
 
-        log("\nLog saved to: " + getLogFilename());
-
-        return success;
     }
-    
     /**
      * @brief Get covariance scale history
      */
@@ -817,22 +557,27 @@ protected:
      * @brief Log PCEM-specific configuration
      */
     void logPlannerSpecificConfig() override {
+        if (!pce_config_) return;
+
         log("--- PCEM Planner Parameters ---");
         log("  Algorithm:            Proximal Cross-Entropy Method");
         logf("  Number of samples:    %zu", num_samples_);
         logf("  Number of iterations: %zu", num_iterations_);
-        logf("  Initial temperature:  %.4f", temperature_);
-        logf("  Temperature scaling:  %.4f (alpha_temp)", 1.01f);
+        
+        // Updated to reflect the new scheduling logic
+        logf("  Initial Temp:         %.4f", pce_config_->temperature);
+        logf("  Final Temp:           %.4f", pce_config_->temperature_final);
+        
         logf("  Initial eta:          %.4f", eta_);
-        logf("  Initial gamma:        %.4f", gamma_);
-        logf("  Gamma decay:          %.4f (alpha)", 0.99f);
+        logf("  Fixed gamma:          %.4f", gamma_);
         logf("  Convergence threshold: %.6f", convergence_threshold_);
         log("");
         log("--- Covariance Scheduling ---");
+        
+        // Accessing getScheduleName() through the shared_ptr
         logf("  Schedule:             %s", pce_config_->getScheduleName().c_str());
         logf("  Initial scale:        %.4f", cov_scale_initial_);
         logf("  Final scale:          %.4f", cov_scale_final_);
-        logf("  Decay rate:           %.4f", cov_decay_rate_);
         log("");
     }
 
@@ -852,6 +597,7 @@ private:
     float convergence_threshold_ = 0.01f;
 
     float ema_alpha_ = 0.5f;
+    float elite_ratio_ = 0.1f;
     
     // Covariance scheduling parameters
     CovarianceSchedule cov_schedule_ = CovarianceSchedule::EXPONENTIAL;
@@ -865,6 +611,7 @@ private:
     
     // History tracking
     std::vector<float> covariance_scale_history_;
+    std::vector<float> mean_cost_history_;
     
     std::mt19937 random_engine_;
 };

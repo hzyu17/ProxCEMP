@@ -272,30 +272,46 @@ int main() {
     // SUMMARY
     // =========================================================================
     std::cout << "\n=================================================\n";
-    std::cout << "   Results Summary\n";
+    std::cout << "   Results Summary (Unified Cost Evaluation)\n";
     std::cout << "=================================================\n";
 
-    std::cout << "PCE Planner:\n";
-    std::cout << "  Status: " << (success_pce ? "SUCCESS" : "FAILED") << "\n";
-    std::cout << "  Iterations: " << pce_history.total_iterations << "\n";
-    std::cout << "  Initial cost: " << pce_history.iterations.front().total_cost << "\n";
-    std::cout << "  Final cost: " << pce_history.final_cost << "\n";
-    
-    std::cout << "\nNGD Planner:\n";
-    std::cout << "  Status: " << (success_ngd ? "SUCCESS" : "FAILED") << "\n";
-    std::cout << "  Iterations: " << ngd_history.total_iterations << "\n";
-    std::cout << "  Initial cost: " << ngd_history.iterations.front().total_cost << "\n";
-    std::cout << "  Final cost: " << ngd_history.final_cost << "\n";
+    // Define a lambda for consistent evaluation using the same task logic
+    auto evaluate_final = [&](const Trajectory& traj) {
+        float collision = task_pce->computeCollisionCost(traj);
+        float smoothness = planner_pce->computeSmoothnessCost(traj); // Smoothness logic is usually in the base planner
+        return std::make_pair(collision + smoothness, collision);
+    };
 
-    std::cout << "\nCasADi Planner:\n";
-    std::cout << "  Status: " << (success_casadi ? "SUCCESS" : "FAILED") << "\n";
-    std::cout << "  Iterations: " << casadi_history.total_iterations << "\n";
-    std::cout << "  Initial cost: " << casadi_history.iterations.front().total_cost << "\n";
-    std::cout << "  Final cost: " << casadi_history.final_cost << "\n";
-    
-    std::cout << "\nUse arrow keys to navigate iterations in the visualizer.\n";
-    std::cout << "Press 'P' to save high-resolution PNG.\n";
-    std::cout << "=================================================\n";
+    auto pce_final_res = evaluate_final(planner_pce->getCurrentTrajectory());
+    auto ngd_final_res = evaluate_final(planner_ngd->getCurrentTrajectory());
+    auto casadi_final_res = evaluate_final(planner_casadi->getCurrentTrajectory());
+
+    std::cout << std::left << std::setw(15) << "Planner" 
+              << std::setw(12) << "Status" 
+              << std::setw(12) << "Iters" 
+              << std::setw(15) << "Total Cost" 
+              << "Collision Cost\n";
+    std::cout << std::string(65, '-') << "\n";
+
+    std::cout << std::left << std::setw(15) << "PCE" 
+              << std::setw(12) << (success_pce ? "SUCCESS" : "FAILED")
+              << std::setw(12) << pce_history.total_iterations
+              << std::setw(15) << pce_final_res.first
+              << pce_final_res.second << "\n";
+
+    std::cout << std::left << std::setw(15) << "NGD" 
+              << std::setw(12) << (success_ngd ? "SUCCESS" : "FAILED")
+              << std::setw(12) << ngd_history.total_iterations
+              << std::setw(15) << ngd_final_res.first
+              << ngd_final_res.second << "\n";
+
+    std::cout << std::left << std::setw(15) << "CasADi" 
+              << std::setw(12) << (success_casadi ? "SUCCESS" : "FAILED")
+              << std::setw(12) << casadi_history.total_iterations
+              << std::setw(15) << casadi_final_res.first
+              << casadi_final_res.second << "\n";
+
+    std::cout << "\n=================================================\n";
 
     return 0;
 }
