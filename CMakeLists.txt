@@ -8,6 +8,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Find dependencies
 find_package(Eigen3 REQUIRED)
 
+find_package(CASADI REQUIRED)
+
+# Include Casadi headers
+include_directories(${CASADI_INCLUDE_DIRS})
+
 # Define header-only library interface
 add_library(pce_motion_planner INTERFACE)
 
@@ -15,10 +20,11 @@ add_library(pce_motion_planner INTERFACE)
 target_include_directories(pce_motion_planner INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+    ${CASADI_INCLUDE_DIRS}
 )
 
 # Link Eigen3
-target_link_libraries(pce_motion_planner INTERFACE Eigen3::Eigen)
+target_link_libraries(pce_motion_planner INTERFACE Eigen3::Eigen ${CASADI_LIBRARIES})
 
 # Installation rules
 include(GNUInstallDirs)

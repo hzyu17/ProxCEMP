@@ -341,9 +341,9 @@ public:
             natural_gradient /= static_cast<float>(M);
             
             // Update
-            Eigen::MatrixXf Y_new = (1.0f - current_lr) * Y_k - current_lr * natural_gradient;
+            Eigen::MatrixXf Y_new = (1.0f -  current_lr) * Y_k - current_lr * natural_gradient;
             
-            Eigen::MatrixXf Y_new = (1.0f - learning_rate_) * Y_k - learning_rate_ * natural_gradient;
+            // Eigen::MatrixXf Y_new = (1.0f - learning_rate_) * Y_k - learning_rate_ * natural_gradient;
             // Eigen::MatrixXf Y_new = Y_k - learning_rate_ * natural_gradient;
 
             updateTrajectoryFromMatrix(Y_new);

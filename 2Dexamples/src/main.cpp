@@ -1,6 +1,6 @@
 #include "PCEMotionPlanner.h"
 #include "NGDMotionPlanner.h"
-#include "CasADiMotionPlanner.h"
+#include "CasadiMotionPlanner.h"
 #include "CollisionAvoidanceTask.h"
 #include "ObstacleMap.h"
 #include "visualization.h"
