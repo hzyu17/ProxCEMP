@@ -304,11 +304,12 @@ public:
         float best_cost = cost;
         Trajectory best_trajectory = current_trajectory_;
         size_t best_iteration = 0;
-
+        float current_temp = initial_temperature;
+        float current_lr = initial_learning_rate;
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
             // FIX: Use initial values with proper decay
-            float current_lr = initial_learning_rate * std::pow(alpha, iteration - 1);
-            float current_temp = initial_temperature * std::pow(alpha_temp, iteration - 1);
+            // float current_lr = initial_learning_rate * std::pow(alpha, iteration - 1);
+            // float current_temp = initial_temperature * std::pow(alpha_temp, iteration - 1);
             
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
             std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);

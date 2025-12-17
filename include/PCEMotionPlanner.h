@@ -2,6 +2,9 @@
  * @file PCEMotionPlanner.h (Refactored Version - Config in Initialization)
  * @brief Proximal Cross-Entropy Method planner using Task interface
  * 
+ * Features covariance scheduling for exploration-exploitation tradeoff:
+ * - High covariance initially for broad exploration
+ * - Gradually decreasing covariance for fine-tuning
  */
 #pragma once
 
@@ -13,6 +16,19 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+
+
+/**
+ * @brief Covariance scheduling strategies
+ */
+enum class CovarianceSchedule {
+    CONSTANT,       // No scheduling - fixed covariance
+    LINEAR,         // Linear decay: σ(t) = σ_init * (1 - t/T) + σ_final * (t/T)
+    EXPONENTIAL,    // Exponential decay: σ(t) = σ_init * α^t
+    COSINE,         // Cosine annealing: σ(t) = σ_final + 0.5*(σ_init - σ_final)*(1 + cos(πt/T))
+    STEP,           // Step decay: reduce by factor every k iterations
+    ADAPTIVE        // Adaptive based on cost improvement
+};
 
 
 /**
@@ -33,6 +49,19 @@ struct PCEConfig : public MotionPlannerConfig {
     // Derived parameter (computed from eta and temperature)
     float gamma = 0.5f;
     
+    // === Covariance Scheduling Parameters ===
+    CovarianceSchedule cov_schedule = CovarianceSchedule::COSINE;
+    float cov_scale_initial = 1.0f;      // Initial covariance scale (σ_init)
+    float cov_scale_final = 0.1f;        // Final covariance scale (σ_final)
+    float cov_decay_rate = 0.9f;         // Decay rate for exponential schedule (α)
+    size_t cov_step_interval = 3;        // Interval for step schedule
+    float cov_step_factor = 0.5f;        // Reduction factor for step schedule
+    float cov_adaptive_threshold = 0.05f; // Cost improvement threshold for adaptive
+    
+    // === EMA ===
+    float ema_alpha = 0.5f; // 1.0 = no EMA (standard PCE), 0.1 = heavy smoothing
+
+
     /**
      * @brief Load PCE-specific configuration from YAML node
      * @param config YAML node containing configuration
@@ -75,7 +104,51 @@ struct PCEConfig : public MotionPlannerConfig {
                 if (temperature > 0.0f) {
                     gamma = eta / temperature;
                 }
+                
+                // === Load covariance scheduling parameters ===
+                if (pce["covariance_schedule"]) {
+                    std::string schedule_str = pce["covariance_schedule"].as<std::string>();
+                    if (schedule_str == "constant") {
+                        cov_schedule = CovarianceSchedule::CONSTANT;
+                    } else if (schedule_str == "linear") {
+                        cov_schedule = CovarianceSchedule::LINEAR;
+                    } else if (schedule_str == "exponential") {
+                        cov_schedule = CovarianceSchedule::EXPONENTIAL;
+                    } else if (schedule_str == "cosine") {
+                        cov_schedule = CovarianceSchedule::COSINE;
+                    } else if (schedule_str == "step") {
+                        cov_schedule = CovarianceSchedule::STEP;
+                    } else if (schedule_str == "adaptive") {
+                        cov_schedule = CovarianceSchedule::ADAPTIVE;
+                    } else {
+                        std::cerr << "Warning: Unknown covariance schedule '" << schedule_str 
+                                  << "', using exponential\n";
+                        cov_schedule = CovarianceSchedule::EXPONENTIAL;
+                    }
+                }
+                
+                if (pce["cov_scale_initial"]) {
+                    cov_scale_initial = pce["cov_scale_initial"].as<float>();
+                }
+                if (pce["cov_scale_final"]) {
+                    cov_scale_final = pce["cov_scale_final"].as<float>();
+                }
+                if (pce["cov_decay_rate"]) {
+                    cov_decay_rate = pce["cov_decay_rate"].as<float>();
+                }
+                if (pce["cov_step_interval"]) {
+                    cov_step_interval = pce["cov_step_interval"].as<size_t>();
+                }
+                if (pce["cov_step_factor"]) {
+                    cov_step_factor = pce["cov_step_factor"].as<float>();
+                }
+                if (pce["cov_adaptive_threshold"]) {
+                    cov_adaptive_threshold = pce["cov_adaptive_threshold"].as<float>();
+                }
 
+                if (pce["ema_alpha"]) {
+                    ema_alpha = pce["ema_alpha"].as<float>();
+                }
             }
 
             print();
@@ -95,6 +168,11 @@ struct PCEConfig : public MotionPlannerConfig {
     bool validate() const override {
         // Validate base configuration first
         if (!MotionPlannerConfig::validate()) {
+            return false;
+        }
+
+        if (ema_alpha <= 0.0f || ema_alpha > 1.0f) {
+            std::cerr << "Error: ema_alpha must be in (0, 1]\n";
             return false;
         }
         
@@ -134,7 +212,42 @@ struct PCEConfig : public MotionPlannerConfig {
             return false;
         }
         
+        // Validate covariance scheduling parameters
+        if (cov_scale_initial <= 0.0f) {
+            std::cerr << "Error: cov_scale_initial must be positive\n";
+            return false;
+        }
+        
+        if (cov_scale_final < 0.0f) {
+            std::cerr << "Error: cov_scale_final must be non-negative\n";
+            return false;
+        }
+        
+        if (cov_scale_final > cov_scale_initial) {
+            std::cerr << "Warning: cov_scale_final > cov_scale_initial (covariance will increase)\n";
+        }
+        
+        if (cov_decay_rate <= 0.0f || cov_decay_rate > 1.0f) {
+            std::cerr << "Error: cov_decay_rate must be in (0, 1]\n";
+            return false;
+        }
+        
         return true;
+    }
+    
+    /**
+     * @brief Get schedule name as string
+     */
+    std::string getScheduleName() const {
+        switch (cov_schedule) {
+            case CovarianceSchedule::CONSTANT: return "constant";
+            case CovarianceSchedule::LINEAR: return "linear";
+            case CovarianceSchedule::EXPONENTIAL: return "exponential";
+            case CovarianceSchedule::COSINE: return "cosine";
+            case CovarianceSchedule::STEP: return "step";
+            case CovarianceSchedule::ADAPTIVE: return "adaptive";
+            default: return "unknown";
+        }
     }
     
     /**
@@ -158,6 +271,35 @@ struct PCEConfig : public MotionPlannerConfig {
         std::cout << "Collision clearance:    " << collision_clearance << "\n";
         std::cout << "Collision threshold:    " << collision_threshold << "\n";
         std::cout << "\n";
+        
+        // Print covariance scheduling parameters
+        std::cout << "=== Covariance Scheduling ===\n";
+        std::cout << "Schedule type:          " << getScheduleName() << "\n";
+        std::cout << "Initial scale (σ_init): " << cov_scale_initial << "\n";
+        std::cout << "Final scale (σ_final):  " << cov_scale_final << "\n";
+        
+        switch (cov_schedule) {
+            case CovarianceSchedule::EXPONENTIAL:
+                std::cout << "Decay rate (α):         " << cov_decay_rate << "\n";
+                std::cout << "Formula: σ(t) = σ_init * α^t\n";
+                break;
+            case CovarianceSchedule::LINEAR:
+                std::cout << "Formula: σ(t) = σ_init + (σ_final - σ_init) * t/T\n";
+                break;
+            case CovarianceSchedule::COSINE:
+                std::cout << "Formula: σ(t) = σ_final + 0.5*(σ_init - σ_final)*(1 + cos(πt/T))\n";
+                break;
+            case CovarianceSchedule::STEP:
+                std::cout << "Step interval:          " << cov_step_interval << "\n";
+                std::cout << "Step factor:            " << cov_step_factor << "\n";
+                break;
+            case CovarianceSchedule::ADAPTIVE:
+                std::cout << "Improvement threshold:  " << cov_adaptive_threshold << "\n";
+                break;
+            default:
+                break;
+        }
+        std::cout << "\n";
     }
 };
 
@@ -170,6 +312,7 @@ struct PCEConfig : public MotionPlannerConfig {
  * - NO knowledge of collision detection
  * - ALL problem-specific logic in Task
  * 
+ * Features covariance scheduling for exploration-exploitation tradeoff.
  * Configuration is loaded via PCEConfig object, solve() runs optimization.
  */
 class ProximalCrossEntropyMotionPlanner : public MotionPlanner {
@@ -227,6 +370,21 @@ public:
         eta_ = config.eta;
         gamma_ = config.gamma;
         convergence_threshold_ = config.convergence_threshold;
+        
+        // Extract covariance scheduling parameters
+        cov_schedule_ = config.cov_schedule;
+        cov_scale_initial_ = config.cov_scale_initial;
+        cov_scale_final_ = config.cov_scale_final;
+        cov_decay_rate_ = config.cov_decay_rate;
+        cov_step_interval_ = config.cov_step_interval;
+        cov_step_factor_ = config.cov_step_factor;
+        cov_adaptive_threshold_ = config.cov_adaptive_threshold;
+        
+        // Initialize current covariance scale
+        cov_scale_current_ = cov_scale_initial_;
+
+        // EMA schedule parameter
+        ema_alpha_ = config.ema_alpha;
                 
         // Call base class initialize with base config portion
         bool result = false;
@@ -258,6 +416,10 @@ public:
     float getEta() const { return eta_; }
     float getGamma() const { return gamma_; }
     float getConvergenceThreshold() const { return convergence_threshold_; }
+    
+    // Covariance scheduling getters
+    float getCovarianceScale() const { return cov_scale_current_; }
+    CovarianceSchedule getCovarianceSchedule() const { return cov_schedule_; }
 
     /**
      * @brief Get PCE configuration
@@ -280,6 +442,108 @@ public:
         }
         return task_->computeCollisionCost(trajectory);
     }
+    
+    /**
+     * @brief Compute covariance scale for given iteration
+     * @param iteration Current iteration (1-indexed)
+     * @param prev_cost Previous iteration cost (for adaptive schedule)
+     * @param curr_cost Current iteration cost (for adaptive schedule)
+     * @return Covariance scale factor
+     */
+    float computeCovarianceScale(size_t iteration, float prev_cost = 0.0f, float curr_cost = 0.0f) {
+        float t = static_cast<float>(iteration - 1);  // 0-indexed for formulas
+        float T = static_cast<float>(num_iterations_);
+        
+        switch (cov_schedule_) {
+            case CovarianceSchedule::CONSTANT:
+                return cov_scale_initial_;
+                
+            case CovarianceSchedule::LINEAR:
+                // Linear interpolation from initial to final
+                return cov_scale_initial_ + (cov_scale_final_ - cov_scale_initial_) * (t / T);
+                
+            case CovarianceSchedule::EXPONENTIAL:
+                // Exponential decay: σ(t) = σ_init * α^t
+                // Optionally clamp to final value
+                return std::max(cov_scale_final_, 
+                               cov_scale_initial_ * std::pow(cov_decay_rate_, t));
+                
+            case CovarianceSchedule::COSINE:
+                // Cosine annealing (smooth transition)
+                return cov_scale_final_ + 0.5f * (cov_scale_initial_ - cov_scale_final_) * 
+                       (1.0f + std::cos(M_PI * t / T));
+                
+            case CovarianceSchedule::STEP:
+                // Step decay: reduce by factor every k iterations
+                {
+                    size_t num_steps = (iteration - 1) / cov_step_interval_;
+                    float scale = cov_scale_initial_ * std::pow(cov_step_factor_, 
+                                                                 static_cast<float>(num_steps));
+                    return std::max(cov_scale_final_, scale);
+                }
+                
+            case CovarianceSchedule::ADAPTIVE:
+                // Adaptive: reduce if cost improved, else keep or increase slightly
+                {
+                    if (iteration <= 1) {
+                        return cov_scale_current_;
+                    }
+                    
+                    float improvement = (prev_cost - curr_cost) / (std::abs(prev_cost) + 1e-6f);
+                    
+                    if (improvement > cov_adaptive_threshold_) {
+                        // Good improvement - reduce covariance to focus search
+                        cov_scale_current_ *= cov_decay_rate_;
+                    } else if (improvement < 0) {
+                        // Cost increased - slightly increase covariance to explore more
+                        cov_scale_current_ *= (1.0f + 0.1f * (1.0f - cov_decay_rate_));
+                    }
+                    // else: small improvement - keep current scale
+                    
+                    // Clamp to bounds
+                    cov_scale_current_ = std::max(cov_scale_final_, 
+                                                  std::min(cov_scale_initial_, cov_scale_current_));
+                    return cov_scale_current_;
+                }
+                
+            default:
+                return cov_scale_initial_;
+        }
+    }
+
+    /**
+     * @brief Sample noise matrices with covariance scaling
+     * 
+     * Samples ε ~ N(0, σ² * Σ) where:
+     * - Σ = R⁻¹ is the structured covariance from the smoothness prior
+     * - σ is the covariance scale factor
+     * 
+     * Implementation:
+     * 1. Sample z ~ N(0, I) 
+     * 2. Transform via Cholesky: ε_base ~ N(0, Σ) by solving L·ε = z
+     * 3. Scale: ε = σ · ε_base ~ N(0, σ²·Σ)
+     * 
+     * @param num_samples Number of samples to generate
+     * @param scale Covariance scale factor σ
+     * @return Vector of scaled noise matrices
+     */
+    std::vector<Eigen::MatrixXf> sampleScaledNoiseMatrices(size_t num_samples, float scale) {
+        const size_t N = current_trajectory_.nodes.size();
+        const size_t D = num_dimensions_;
+        
+        // Sample from structured prior (ε ~ N(0, Σ))
+        std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(num_samples, N, D);
+        
+        // Scale samples: σ·ε ~ N(0, σ²·Σ)
+        // This preserves the correlation structure while adjusting variance
+        if (std::abs(scale - 1.0f) > 1e-6f) {
+            for (size_t m = 0; m < num_samples; ++m) {
+                epsilon_samples[m] *= scale;
+            }
+        }
+        
+        return epsilon_samples;
+    }
 
     /**
      * @brief Runs the PCEM optimization loop
@@ -291,7 +555,11 @@ public:
         }
 
         log("\n--- Starting PCEM Optimization ---\n");
-        log("Update Rule: Y_{k+1} = Σ w_m (Y_k + ε_m), where w ∝ exp(-γ(S(ỹ) + ε^T*R*Y_k))\n\n");
+        log("Update Rule: Y_{k+1} = Σ w_m (Y_k + σ_k * ε_m)\n");
+        log("  where ε_m ~ N(0, R⁻¹) samples from smoothness prior\n");
+        log("  and σ_k is the covariance scale at iteration k\n");
+        logf("Covariance Schedule: %s (σ_init=%.3f → σ_final=%.3f)\n\n",
+             pce_config_->getScheduleName().c_str(), cov_scale_initial_, cov_scale_final_);
         
         const size_t N = current_trajectory_.nodes.size();
         const size_t M = num_samples_;
@@ -308,23 +576,30 @@ public:
 
         float best_cost = std::numeric_limits<float>::infinity();
         size_t best_iteration = 0;
+        
+        // Reset covariance scale
+        cov_scale_current_ = cov_scale_initial_;
 
         // Clear history
         trajectory_history_.clear();
+        covariance_scale_history_.clear();
         
         // Iteration 0: Evaluate and store initial trajectory
+        float prev_cost = 0.0f;
         {
             float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
             float smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float cost = collision_cost + smoothness_cost;
             
-            logf("Iteration 0 (Initial) - Cost: %.2f (Collision: %.4f, Smoothness: %.4f)",
-                cost, collision_cost, smoothness_cost);
+            logf("Iter 0 (Init) - Cost: %.2f (Coll: %.4f, Smooth: %.4f), σ=%.4f",
+                cost, collision_cost, smoothness_cost, cov_scale_current_);
             
             trajectory_history_.push_back(current_trajectory_);
+            covariance_scale_history_.push_back(cov_scale_current_);
             
             best_cost = cost;
             best_iteration = 0;
+            prev_cost = cost;
         }
         
         // Main optimization loop
@@ -341,8 +616,9 @@ public:
                 return false;
             }
 
-            // Sample noise matrices
-            std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
+            // Sample noise matrices with current covariance scale
+            // ε ~ N(0, σ² * R⁻¹) - scaled structured noise
+            std::vector<Eigen::MatrixXf> epsilon_samples = sampleScaledNoiseMatrices(M, cov_scale_current_);
             
             if (epsilon_samples.size() != M) {
                 std::cerr << "Error: Wrong number of noise matrices!\n";
@@ -416,13 +692,17 @@ public:
                 weights /= weight_sum;
             }
             
-            // Compute Y_{k+1} via weighted mean update
-            MatrixXf Y_new = MatrixXf::Zero(D, N);
-            
+            // 1. Compute Y_{k+1} via weighted mean update
+            MatrixXf Y_weighted = MatrixXf::Zero(D, N);
+
             for (size_t m = 0; m < M; ++m) {
                 Eigen::MatrixXf temp = Y_k + epsilon_samples[m];
-                Y_new += weights(m) * temp;
+                Y_weighted += weights(m) * temp; // EMA updates
             }
+
+            // 2. Apply EMA Update: Y_{k+1} = (1 - α) * Y_k + α * Y_weighted
+            // This acts as an adaptive step size.
+            MatrixXf Y_new = (1.0f - ema_alpha_) * Y_k + ema_alpha_ * Y_weighted;
             
             updateTrajectoryFromMatrix(Y_new);
 
@@ -438,14 +718,15 @@ public:
 
             // Store trajectory
             trajectory_history_.push_back(current_trajectory_);
+            covariance_scale_history_.push_back(cov_scale_current_);
 
             // Compute costs
             float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
             float smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float cost = collision_cost + smoothness_cost;
             
-            logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f)",
-                iteration, cost, collision_cost, smoothness_cost);
+            logf("Iter %2zu - Cost: %.2f (Coll: %.4f, Smooth: %.4f), σ=%.4f",
+                iteration, cost, collision_cost, smoothness_cost, cov_scale_current_);
             
             // Track best trajectory
             if (cost < best_cost) {
@@ -454,15 +735,18 @@ public:
                 best_iteration = iteration;
             }
             
+            // Update covariance scale for next iteration
+            cov_scale_current_ = computeCovarianceScale(iteration + 1, prev_cost, cost);
+            
             // Check convergence
             if (iteration > 1) {
-                float prev_cost = task_->computeCollisionCostSimple(trajectory_history_[iteration - 1]) + 
-                                computeSmoothnessCost(trajectory_history_[iteration - 1]);
                 if (std::abs(prev_cost - cost) < convergence_threshold_ && prev_cost - cost > 0) {
                     log("Cost improvement negligible. Stopping.\n");
                     break;
                 }
             }
+            
+            prev_cost = cost;
             
             // Notify task
             task_->postIteration(iteration, cost, current_trajectory_);
@@ -487,11 +771,25 @@ public:
         
         logf("PCEM finished. Final Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
             final_cost, final_collision, final_smoothness);
+        
+        // Log covariance schedule summary
+        log("\nCovariance Schedule History:");
+        for (size_t i = 0; i < covariance_scale_history_.size(); ++i) {
+            logf("  Iter %zu: σ = %.4f", i, covariance_scale_history_[i]);
+        }
 
         log("\nLog saved to: " + getLogFilename());
 
         return success;
     }
+    
+    /**
+     * @brief Get covariance scale history
+     */
+    const std::vector<float>& getCovarianceScaleHistory() const {
+        return covariance_scale_history_;
+    }
+    
 protected:
     
     /**
@@ -530,6 +828,12 @@ protected:
         logf("  Gamma decay:          %.4f (alpha)", 0.99f);
         logf("  Convergence threshold: %.6f", convergence_threshold_);
         log("");
+        log("--- Covariance Scheduling ---");
+        logf("  Schedule:             %s", pce_config_->getScheduleName().c_str());
+        logf("  Initial scale:        %.4f", cov_scale_initial_);
+        logf("  Final scale:          %.4f", cov_scale_final_);
+        logf("  Decay rate:           %.4f", cov_decay_rate_);
+        log("");
     }
 
 private:
@@ -546,6 +850,21 @@ private:
     float eta_ = 1.0f;
     float gamma_ = 0.5f;
     float convergence_threshold_ = 0.01f;
+
+    float ema_alpha_ = 0.5f;
+    
+    // Covariance scheduling parameters
+    CovarianceSchedule cov_schedule_ = CovarianceSchedule::EXPONENTIAL;
+    float cov_scale_initial_ = 1.0f;
+    float cov_scale_final_ = 0.1f;
+    float cov_decay_rate_ = 0.9f;
+    size_t cov_step_interval_ = 3;
+    float cov_step_factor_ = 0.5f;
+    float cov_adaptive_threshold_ = 0.05f;
+    float cov_scale_current_ = 1.0f;
+    
+    // History tracking
+    std::vector<float> covariance_scale_history_;
     
     std::mt19937 random_engine_;
 };
