@@ -116,7 +116,7 @@ struct CasADiConfig : public MotionPlannerConfig {
     }
     
     void print() const override {
-        MotionPlannerConfig::print();
+        // MotionPlannerConfig::print();
         
         std::cout << "=== CasADi Planner Configuration ===\n";
         std::cout << "Algorithm:              L-BFGS (CasADi symbolic + numerical gradients)\n";
@@ -196,9 +196,9 @@ public:
         // Call base class initialize
         bool result = MotionPlanner::initialize(config);
         
-        if (result) {
-            casadi_config_->print();
-        }
+        // if (result) {
+        //     casadi_config_->print();
+        // }
         
         return result;
     }

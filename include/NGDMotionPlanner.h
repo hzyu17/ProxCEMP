@@ -143,7 +143,7 @@ struct NGDConfig : public MotionPlannerConfig {
      */
     void print() const override {
         // Print base configuration
-        MotionPlannerConfig::print();
+        // MotionPlannerConfig::print();
         
         // Print NGD-specific parameters
         printf("=== NGD Planner Configuration ===\n");
@@ -406,6 +406,8 @@ public:
         
         return success;
     }
+
+
 protected:
     /**
      * @brief Initialize task with trajectory parameters

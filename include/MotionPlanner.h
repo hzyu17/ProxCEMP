@@ -29,6 +29,19 @@
 #include <filesystem>
 
 
+/**
+ * @brief Covariance scheduling strategies
+ */
+enum class CovarianceSchedule {
+    CONSTANT,       // No scheduling - fixed covariance
+    LINEAR,         // Linear decay: σ(t) = σ_init * (1 - t/T) + σ_final * (t/T)
+    EXPONENTIAL,    // Exponential decay: σ(t) = σ_init * α^t
+    COSINE,         // Cosine annealing: σ(t) = σ_final + 0.5*(σ_init - σ_final)*(1 + cos(πt/T))
+    STEP,           // Step decay: reduce by factor every k iterations
+    ADAPTIVE        // Adaptive based on cost improvement
+};
+
+
 struct MotionPlannerConfig {
     // Motion planning parameters
     size_t num_dimensions = 2;
@@ -46,6 +59,15 @@ struct MotionPlannerConfig {
     
     // Environment parameters
     float clearance_distance = 2.0f;
+
+    // === NEW: Covariance Scheduling Parameters ===
+    CovarianceSchedule cov_schedule = CovarianceSchedule::COSINE;
+    float cov_scale_initial = 1.0f;
+    float cov_scale_final = 0.01f;
+    float cov_decay_rate = 0.9f;
+    size_t cov_step_interval = 3;
+    float cov_step_factor = 0.5f;
+    float cov_adaptive_threshold = 0.05f;
     
     /**
      * @brief Load configuration from YAML file
@@ -112,6 +134,29 @@ struct MotionPlannerConfig {
                 if (env["clearance_distance"]) {
                     clearance_distance = env["clearance_distance"].as<float>();
                 }
+            }
+
+
+            // === NEW: Load covariance parameters from YAML ===
+            if (config["pce_planner"] || config["ngd_planner"]) {
+                // We check both for cross-compatibility, or look at a specific block
+                const YAML::Node& planner = config["pce_planner"] ? config["pce_planner"] : config["ngd_planner"];
+                
+                if (planner["covariance_schedule"]) {
+                    std::string s = planner["covariance_schedule"].as<std::string>();
+                    if (s == "constant") cov_schedule = CovarianceSchedule::CONSTANT;
+                    else if (s == "linear") cov_schedule = CovarianceSchedule::LINEAR;
+                    else if (s == "exponential") cov_schedule = CovarianceSchedule::EXPONENTIAL;
+                    else if (s == "cosine") cov_schedule = CovarianceSchedule::COSINE;
+                    else if (s == "step") cov_schedule = CovarianceSchedule::STEP;
+                    else if (s == "adaptive") cov_schedule = CovarianceSchedule::ADAPTIVE;
+                }
+                if (planner["cov_scale_initial"]) cov_scale_initial = planner["cov_scale_initial"].as<float>();
+                if (planner["cov_scale_final"])   cov_scale_final = planner["cov_scale_final"].as<float>();
+                if (planner["cov_decay_rate"])    cov_decay_rate = planner["cov_decay_rate"].as<float>();
+                if (planner["cov_step_interval"]) cov_step_interval = planner["cov_step_interval"].as<size_t>();
+                if (planner["cov_step_factor"])   cov_step_factor = planner["cov_step_factor"].as<float>();
+                if (planner["cov_adaptive_threshold"]) cov_adaptive_threshold = planner["cov_adaptive_threshold"].as<float>();
             }
             
             return validate();
@@ -200,6 +245,7 @@ enum class InterpolationMethod {
     BEZIER
 };
 
+
 // Forward declarations
 struct ObstacleND;  // Only for getObstacles() return type
 
@@ -224,6 +270,38 @@ public:
      * @brief Get planner name (must be implemented by derived classes)
      */
     virtual std::string getPlannerName() const = 0;
+
+
+    /**
+     * @brief Shared Covariance Scale Computation
+     */
+    float computeCovarianceScale(size_t iteration, float prev_cost = 0.0f, float curr_cost = 0.0f) {
+        float t = static_cast<float>(iteration - 1);
+        float T = static_cast<float>(num_nodes_); // Using trajectory length as a heuristic for T
+
+        switch (cov_schedule_) {
+            case CovarianceSchedule::CONSTANT: return cov_scale_initial_;
+            case CovarianceSchedule::LINEAR:
+                return cov_scale_initial_ + (cov_scale_final_ - cov_scale_initial_) * (t / T);
+            case CovarianceSchedule::EXPONENTIAL:
+                return std::max(cov_scale_final_, cov_scale_initial_ * std::pow(cov_decay_rate_, t));
+            case CovarianceSchedule::COSINE:
+                return cov_scale_final_ + 0.5f * (cov_scale_initial_ - cov_scale_final_) * (1.0f + std::cos(M_PI * t / T));
+            case CovarianceSchedule::STEP: {
+                size_t num_steps = (iteration - 1) / cov_step_interval_;
+                return std::max(cov_scale_final_, cov_scale_initial_ * std::pow(cov_step_factor_, static_cast<float>(num_steps)));
+            }
+            case CovarianceSchedule::ADAPTIVE: {
+                if (iteration <= 1) return cov_scale_current_;
+                float improvement = (prev_cost - curr_cost) / (std::abs(prev_cost) + 1e-6f);
+                if (improvement > cov_adaptive_threshold_) cov_scale_current_ *= cov_decay_rate_;
+                else if (improvement < 0) cov_scale_current_ *= (1.0f + 0.1f * (1.0f - cov_decay_rate_));
+                cov_scale_current_ = std::max(cov_scale_final_, std::min(cov_scale_initial_, cov_scale_current_));
+                return cov_scale_current_;
+            }
+            default: return cov_scale_initial_;
+        }
+    }
 
     /**
      * @brief Initialize planner with configuration object
@@ -271,7 +349,19 @@ public:
             return false;
         }
         
+
+        // Extract Covariance parameters
+        cov_schedule_ = config.cov_schedule;
+        cov_scale_initial_ = config.cov_scale_initial;
+        cov_scale_final_ = config.cov_scale_final;
+        cov_decay_rate_ = config.cov_decay_rate;
+        cov_step_interval_ = config.cov_step_interval;
+        cov_step_factor_ = config.cov_step_factor;
+        cov_adaptive_threshold_ = config.cov_adaptive_threshold;
+        cov_scale_current_ = cov_scale_initial_;
+
         is_initialized_ = true;
+
         return true;
     }
 
@@ -503,6 +593,16 @@ public:
     }
 
 protected:
+
+    // === NEW: Covariance State Variables ===
+    CovarianceSchedule cov_schedule_;
+    float cov_scale_initial_;
+    float cov_scale_final_;
+    float cov_decay_rate_;
+    size_t cov_step_interval_;
+    float cov_step_factor_;
+    float cov_adaptive_threshold_;
+    float cov_scale_current_;
 
     /**
      * @brief Samples a 1D vector from the Gaussian distribution N(0, R^{-1}).

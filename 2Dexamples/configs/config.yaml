@@ -26,7 +26,7 @@ motion_planning:
 
 pce_planner:
   num_samples: 100
-  num_iterations: 50
+  num_iterations: 100
   eta: 1.5                  # This will set gamma to 0.6
   temperature: 1.5          # Initial broad consensus
   temperature_final: 0.05   # Late-stage "snap" to the best sample
@@ -38,13 +38,17 @@ pce_planner:
 
 ngd_planner:
   num_samples: 100
-  num_iterations: 50
+  num_iterations: 100
   learning_rate: 0.0001
-  temperature: 1.0
-  convergence_threshold: 0.05
+  ema_alpha: 0.4
+  temperature: 1.5
+  temperature_final: 0.1
+  covariance_schedule: "cosine"
+  cov_scale_initial: 1.0
+  cov_scale_final: 0.05
   
 casadi_planner:
-  max_iterations: 500
+  max_iterations: 100
   tolerance: 1e-6
   collision_weight: 1.0
   solver: "ipopt"

@@ -19,19 +19,6 @@
 
 
 /**
- * @brief Covariance scheduling strategies
- */
-enum class CovarianceSchedule {
-    CONSTANT,       // No scheduling - fixed covariance
-    LINEAR,         // Linear decay: σ(t) = σ_init * (1 - t/T) + σ_final * (t/T)
-    EXPONENTIAL,    // Exponential decay: σ(t) = σ_init * α^t
-    COSINE,         // Cosine annealing: σ(t) = σ_final + 0.5*(σ_init - σ_final)*(1 + cos(πt/T))
-    STEP,           // Step decay: reduce by factor every k iterations
-    ADAPTIVE        // Adaptive based on cost improvement
-};
-
-
-/**
  * @brief Configuration for Proximal Cross-Entropy Method planner
  * 
  * Extends MotionPlannerConfig with PCE-specific algorithm parameters
@@ -52,16 +39,7 @@ struct PCEConfig : public MotionPlannerConfig {
 
     // Elite portion
     float elite_ratio = 0.1f;
-    
-    // === Covariance Scheduling Parameters ===
-    CovarianceSchedule cov_schedule = CovarianceSchedule::COSINE;
-    float cov_scale_initial = 1.0f;
-    float cov_scale_final = 0.01f;
-    float cov_decay_rate = 0.9f;
-    size_t cov_step_interval = 3;
-    float cov_step_factor = 0.5f;
-    float cov_adaptive_threshold = 0.05f;
-    
+        
     // === EMA ===
     float ema_alpha = 0.5f;
 
@@ -93,22 +71,22 @@ struct PCEConfig : public MotionPlannerConfig {
                 if (pce["collision_clearance"]) collision_clearance = pce["collision_clearance"].as<float>();
                 if (pce["collision_threshold"]) collision_threshold = pce["collision_threshold"].as<float>();
                 
-                // Covariance Schedule
-                if (pce["covariance_schedule"]) {
-                    std::string s = pce["covariance_schedule"].as<std::string>();
-                    if (s == "constant") cov_schedule = CovarianceSchedule::CONSTANT;
-                    else if (s == "linear") cov_schedule = CovarianceSchedule::LINEAR;
-                    else if (s == "exponential") cov_schedule = CovarianceSchedule::EXPONENTIAL;
-                    else if (s == "cosine") cov_schedule = CovarianceSchedule::COSINE;
-                    else if (s == "step") cov_schedule = CovarianceSchedule::STEP;
-                    else if (s == "adaptive") cov_schedule = CovarianceSchedule::ADAPTIVE;
-                }
+                // // Covariance Schedule
+                // if (pce["covariance_schedule"]) {
+                //     std::string s = pce["covariance_schedule"].as<std::string>();
+                //     if (s == "constant") cov_schedule = CovarianceSchedule::CONSTANT;
+                //     else if (s == "linear") cov_schedule = CovarianceSchedule::LINEAR;
+                //     else if (s == "exponential") cov_schedule = CovarianceSchedule::EXPONENTIAL;
+                //     else if (s == "cosine") cov_schedule = CovarianceSchedule::COSINE;
+                //     else if (s == "step") cov_schedule = CovarianceSchedule::STEP;
+                //     else if (s == "adaptive") cov_schedule = CovarianceSchedule::ADAPTIVE;
+                // }
                 
-                if (pce["cov_scale_initial"]) cov_scale_initial = pce["cov_scale_initial"].as<float>();
-                if (pce["cov_scale_final"])   cov_scale_final = pce["cov_scale_final"].as<float>();
-                if (pce["cov_decay_rate"])    cov_decay_rate = pce["cov_decay_rate"].as<float>();
-                if (pce["cov_step_interval"]) cov_step_interval = pce["cov_step_interval"].as<size_t>();
-                if (pce["cov_step_factor"])   cov_step_factor = pce["cov_step_factor"].as<float>();
+                // if (pce["cov_scale_initial"]) cov_scale_initial = pce["cov_scale_initial"].as<float>();
+                // if (pce["cov_scale_final"])   cov_scale_final = pce["cov_scale_final"].as<float>();
+                // if (pce["cov_decay_rate"])    cov_decay_rate = pce["cov_decay_rate"].as<float>();
+                // if (pce["cov_step_interval"]) cov_step_interval = pce["cov_step_interval"].as<size_t>();
+                // if (pce["cov_step_factor"])   cov_step_factor = pce["cov_step_factor"].as<float>();
             }
             return validate();
         } catch (const std::exception& e) {
@@ -238,9 +216,9 @@ public:
             return false;
         }
         
-        if (result) {
-            pce_config_->print();
-        }
+        // if (result) {
+        //     pce_config_->print();
+        // }
         
         return result;
     }
@@ -286,73 +264,73 @@ public:
         return task_->computeCollisionCost(trajectory);
     }
     
-    /**
-     * @brief Compute covariance scale for given iteration
-     * @param iteration Current iteration (1-indexed)
-     * @param prev_cost Previous iteration cost (for adaptive schedule)
-     * @param curr_cost Current iteration cost (for adaptive schedule)
-     * @return Covariance scale factor
-     */
-    float computeCovarianceScale(size_t iteration, float prev_cost = 0.0f, float curr_cost = 0.0f) {
-        float t = static_cast<float>(iteration - 1);  // 0-indexed for formulas
-        float T = static_cast<float>(num_iterations_);
+    // /**
+    //  * @brief Compute covariance scale for given iteration
+    //  * @param iteration Current iteration (1-indexed)
+    //  * @param prev_cost Previous iteration cost (for adaptive schedule)
+    //  * @param curr_cost Current iteration cost (for adaptive schedule)
+    //  * @return Covariance scale factor
+    //  */
+    // float computeCovarianceScale(size_t iteration, float prev_cost = 0.0f, float curr_cost = 0.0f) {
+    //     float t = static_cast<float>(iteration - 1);  // 0-indexed for formulas
+    //     float T = static_cast<float>(num_iterations_);
         
-        switch (cov_schedule_) {
-            case CovarianceSchedule::CONSTANT:
-                return cov_scale_initial_;
+    //     switch (cov_schedule_) {
+    //         case CovarianceSchedule::CONSTANT:
+    //             return cov_scale_initial_;
                 
-            case CovarianceSchedule::LINEAR:
-                // Linear interpolation from initial to final
-                return cov_scale_initial_ + (cov_scale_final_ - cov_scale_initial_) * (t / T);
+    //         case CovarianceSchedule::LINEAR:
+    //             // Linear interpolation from initial to final
+    //             return cov_scale_initial_ + (cov_scale_final_ - cov_scale_initial_) * (t / T);
                 
-            case CovarianceSchedule::EXPONENTIAL:
-                // Exponential decay: σ(t) = σ_init * α^t
-                // Optionally clamp to final value
-                return std::max(cov_scale_final_, 
-                               cov_scale_initial_ * std::pow(cov_decay_rate_, t));
+    //         case CovarianceSchedule::EXPONENTIAL:
+    //             // Exponential decay: σ(t) = σ_init * α^t
+    //             // Optionally clamp to final value
+    //             return std::max(cov_scale_final_, 
+    //                            cov_scale_initial_ * std::pow(cov_decay_rate_, t));
                 
-            case CovarianceSchedule::COSINE:
-                // Cosine annealing (smooth transition)
-                return cov_scale_final_ + 0.5f * (cov_scale_initial_ - cov_scale_final_) * 
-                       (1.0f + std::cos(M_PI * t / T));
+    //         case CovarianceSchedule::COSINE:
+    //             // Cosine annealing (smooth transition)
+    //             return cov_scale_final_ + 0.5f * (cov_scale_initial_ - cov_scale_final_) * 
+    //                    (1.0f + std::cos(M_PI * t / T));
                 
-            case CovarianceSchedule::STEP:
-                // Step decay: reduce by factor every k iterations
-                {
-                    size_t num_steps = (iteration - 1) / cov_step_interval_;
-                    float scale = cov_scale_initial_ * std::pow(cov_step_factor_, 
-                                                                 static_cast<float>(num_steps));
-                    return std::max(cov_scale_final_, scale);
-                }
+    //         case CovarianceSchedule::STEP:
+    //             // Step decay: reduce by factor every k iterations
+    //             {
+    //                 size_t num_steps = (iteration - 1) / cov_step_interval_;
+    //                 float scale = cov_scale_initial_ * std::pow(cov_step_factor_, 
+    //                                                              static_cast<float>(num_steps));
+    //                 return std::max(cov_scale_final_, scale);
+    //             }
                 
-            case CovarianceSchedule::ADAPTIVE:
-                // Adaptive: reduce if cost improved, else keep or increase slightly
-                {
-                    if (iteration <= 1) {
-                        return cov_scale_current_;
-                    }
+    //         case CovarianceSchedule::ADAPTIVE:
+    //             // Adaptive: reduce if cost improved, else keep or increase slightly
+    //             {
+    //                 if (iteration <= 1) {
+    //                     return cov_scale_current_;
+    //                 }
                     
-                    float improvement = (prev_cost - curr_cost) / (std::abs(prev_cost) + 1e-6f);
+    //                 float improvement = (prev_cost - curr_cost) / (std::abs(prev_cost) + 1e-6f);
                     
-                    if (improvement > cov_adaptive_threshold_) {
-                        // Good improvement - reduce covariance to focus search
-                        cov_scale_current_ *= cov_decay_rate_;
-                    } else if (improvement < 0) {
-                        // Cost increased - slightly increase covariance to explore more
-                        cov_scale_current_ *= (1.0f + 0.1f * (1.0f - cov_decay_rate_));
-                    }
-                    // else: small improvement - keep current scale
+    //                 if (improvement > cov_adaptive_threshold_) {
+    //                     // Good improvement - reduce covariance to focus search
+    //                     cov_scale_current_ *= cov_decay_rate_;
+    //                 } else if (improvement < 0) {
+    //                     // Cost increased - slightly increase covariance to explore more
+    //                     cov_scale_current_ *= (1.0f + 0.1f * (1.0f - cov_decay_rate_));
+    //                 }
+    //                 // else: small improvement - keep current scale
                     
-                    // Clamp to bounds
-                    cov_scale_current_ = std::max(cov_scale_final_, 
-                                                  std::min(cov_scale_initial_, cov_scale_current_));
-                    return cov_scale_current_;
-                }
+    //                 // Clamp to bounds
+    //                 cov_scale_current_ = std::max(cov_scale_final_, 
+    //                                               std::min(cov_scale_initial_, cov_scale_current_));
+    //                 return cov_scale_current_;
+    //             }
                 
-            default:
-                return cov_scale_initial_;
-        }
-    }
+    //         default:
+    //             return cov_scale_initial_;
+    //     }
+    // }
 
     /**
      * @brief Sample noise matrices with covariance scaling
@@ -400,8 +378,6 @@ public:
         const size_t N = current_trajectory_.nodes.size();
         const size_t M = num_samples_;
         const size_t D = num_dimensions_;
-        float alpha_decay = 0.99f;
-        float alpha_temp = 1.01f;
 
         float best_cost = std::numeric_limits<float>::infinity();
         size_t best_iteration = 0;
@@ -410,14 +386,16 @@ public:
         // Reset history
         trajectory_history_.clear();
         covariance_scale_history_.clear();
+        mean_cost_history_.clear(); // Added history reset
 
         gamma_ = pce_config_->gamma;
 
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
-            // 1. Update hyperparameters
-            // gamma_ = gamma_ * std::pow(alpha_decay, iteration - 1);
-            // temperature_ = temperature_ * alpha_temp;
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
+
+            // --- Temperature Schedule Calculation ---
+            float progress = static_cast<float>(iteration - 1) / std::max(1.0f, static_cast<float>(num_iterations_ - 1));
+            float current_temp = pce_config_->temperature * std::pow((pce_config_->temperature_final / pce_config_->temperature), progress);
 
             // 2. Sampling and Evaluation
             std::vector<Eigen::MatrixXf> epsilon_samples = sampleScaledNoiseMatrices(M, cov_scale_current_);
@@ -439,39 +417,27 @@ public:
 
             const size_t num_elites = std::max(static_cast<size_t>(1), static_cast<size_t>(M * elite_ratio_));
             
-            // Find cost range for adaptive sharpening
-            float min_elite_cost = sample_collisions[indices[0]];
-            float max_elite_cost = sample_collisions[indices[num_elites - 1]];
-            float cost_range = max_elite_cost - min_elite_cost;
-
-            // 4. Adaptive Weight Sharpening
+            // 4. Weight Calculation (using scheduled temperature)
             Eigen::VectorXf weights = Eigen::VectorXf::Zero(M);
             float max_exponent = -std::numeric_limits<float>::infinity();
             
-            // We use a sensitivity factor (kappa) to prevent the temperature from blowing up
-            // If cost_range is small, we stay with the base temperature. 
-            // If cost_range is huge, we scale the temperature up to avoid "Winner-Takes-All" collapse.
-            float adaptive_temp = temperature_ * (1.0f + 0.5f * cost_range);
-
             for (size_t i = 0; i < num_elites; ++i) {
                 size_t m = indices[i];
-                
                 float reg_term = 0.0f;
                 for (size_t d = 0; d < D; ++d) {
                     reg_term += epsilon_samples[m].row(d).dot(R_matrix_ * Y_k.row(d).transpose());
                 }
 
-                // Raw exponent
-                float exponent = -gamma_ * (sample_collisions[m] + reg_term);
+                float exponent = (-gamma_ * (sample_collisions[m] + reg_term)) / current_temp;
                 weights(m) = exponent;
                 if (exponent > max_exponent) max_exponent = exponent;
             }
 
-            // 5. Normalized Softmax with Adaptive Temp
+            // 5. Normalized Softmax
             float weight_sum = 0.0f;
             for (size_t i = 0; i < num_elites; ++i) {
                 size_t m = indices[i];
-                weights(m) = std::exp((weights(m) - max_exponent) / adaptive_temp);
+                weights(m) = std::exp(weights(m) - max_exponent);
                 weight_sum += weights(m);
             }
             weights /= (weight_sum + 1e-10f);
@@ -483,7 +449,6 @@ public:
                 Y_weighted += weights(m) * (Y_k + epsilon_samples[m]);
             }
 
-            // Apply Exponential Moving Average: Y_new = (1-a)Y_k + a*Y_target
             MatrixXf Y_new = (1.0f - ema_alpha_) * Y_k + ema_alpha_ * Y_weighted;
             updateTrajectoryFromMatrix(Y_new);
 
@@ -499,30 +464,32 @@ public:
 
             trajectory_history_.push_back(current_trajectory_);
             covariance_scale_history_.push_back(cov_scale_current_);
+            mean_cost_history_.push_back(current_total_cost); // Record history
 
             if (current_total_cost < best_cost) {
                 best_cost = current_total_cost;
                 best_iteration = iteration;
             }
 
-            logf("Iter %zu: Cost=%.3f (Sharpening Temp: %.3f), σ=%.4f", 
-                iteration, current_total_cost, adaptive_temp, cov_scale_current_);
+            // --- Every 10 steps ---
+            if (iteration == 1 || iteration % 10 == 0 || iteration == num_iterations_) {
+                logf("Iter %zu: Cost=%.3f, Temp=%.4f, σ=%.4f", 
+                    iteration, current_total_cost, current_temp, cov_scale_current_);
+            }
 
-            // Update covariance for next iteration
             cov_scale_current_ = computeCovarianceScale(iteration + 1, prev_cost, current_total_cost);
-            
             if (std::abs(prev_cost - current_total_cost) < convergence_threshold_) break;
             prev_cost = current_total_cost;
             
             task_->postIteration(iteration, current_total_cost, current_trajectory_);
         }
 
-        // Finalize
         current_trajectory_ = trajectory_history_[best_iteration];
         task_->done(true, num_iterations_, best_cost, current_trajectory_);
         return true;
-
     }
+    
+    
     /**
      * @brief Get covariance scale history
      */
