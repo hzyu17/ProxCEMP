@@ -40,3 +40,10 @@ ngd_planner:
   temperature: 1.5
   convergence_threshold: 0.01
   
+casadi_planner:
+  max_iterations: 500
+  tolerance: 1e-6
+  collision_weight: 1.0
+  solver: "ipopt"
+  finite_diff_eps: 1e-4
+  verbose_solver: true

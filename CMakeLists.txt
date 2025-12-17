@@ -31,6 +31,7 @@ install(FILES
     include/Trajectory.h
     include/MotionPlanner.h
     include/ForwardKinematics.h
+    include/CasadiMotionPlanner.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pce
 )
 

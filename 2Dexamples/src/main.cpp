@@ -1,5 +1,6 @@
 #include "PCEMotionPlanner.h"
 #include "NGDMotionPlanner.h"
+#include "CasADiMotionPlanner.h"
 #include "CollisionAvoidanceTask.h"
 #include "ObstacleMap.h"
 #include "visualization.h"
@@ -103,7 +104,7 @@ int main() {
     }
 
     // =========================================================================
-    // NGD PLANNER (similar approach)
+    // NGD PLANNER
     // =========================================================================
     std::cout << "\n=== Running NGD Optimization (with data collection) ===\n";
 
@@ -153,6 +154,88 @@ int main() {
     ngd_history.converged = success_ngd;
     ngd_history.total_iterations = traj_history_ngd.size();
 
+    if (success_ngd) {
+        std::cout << "\n✓ NGD optimization completed successfully\n";
+    } else {
+        std::cout << "\n✗ NGD optimization failed\n";
+    }
+
+    // =========================================================================
+    // CASADI PLANNER
+    // =========================================================================
+    std::cout << "\n=== CasADi Planner ===\n";
+
+    // Create task for CasADi
+    auto task_casadi = std::make_shared<pce::CollisionAvoidanceTask>(config);
+
+    // Create CasADi planner and set task
+    auto planner_casadi = std::make_shared<CasADiMotionPlanner>(task_casadi);
+
+    // Load CasADi configuration
+    CasADiConfig casadi_config;
+    if (!casadi_config.loadFromFile(config_file)) {
+        std::cerr << "Failed to load CasADi configuration from file\n";
+        return -1;
+    }
+
+    std::cout << "\n=== Initializing CasADi Planner ===\n";
+    if (!planner_casadi->initialize(casadi_config)) {
+        std::cerr << "Error: CasADi Planner initialization failed\n";
+        return 1;
+    }
+
+    if (visualize) {
+        std::cout << "Showing CasADi initial state visualization...\n";
+        visualizeInitialState(task_casadi->getObstacles(),
+                            planner_casadi->getCurrentTrajectory(),
+                            "CasADi - Initial State");
+    }
+
+    // =========================================================================
+    // CASADI OPTIMIZATION WITH DATA COLLECTION
+    // =========================================================================
+    std::cout << "\n=== Running CasADi Optimization (with data collection) ===\n";
+
+    OptimizationHistory casadi_history;
+    casadi_history.clear();
+
+    // Store initial state
+    {
+        IterationData init_data;
+        init_data.iteration = 0;
+        init_data.mean_trajectory = planner_casadi->getCurrentTrajectory();
+        init_data.total_cost = task_casadi->computeCollisionCost(init_data.mean_trajectory);
+        init_data.collision_cost = init_data.total_cost;
+        init_data.smoothness_cost = 0.0f;
+        casadi_history.addIteration(init_data);
+    }
+
+    // Run CasADi optimization
+    bool success_casadi = planner_casadi->solve();
+
+    // Convert trajectory history to OptimizationHistory format
+    auto traj_history_casadi = planner_casadi->getTrajectoryHistory();
+    for (size_t i = 0; i < traj_history_casadi.size(); ++i) {
+        IterationData iter_data;
+        iter_data.iteration = i;
+        iter_data.mean_trajectory = traj_history_casadi[i];
+        iter_data.total_cost = task_casadi->computeCollisionCost(traj_history_casadi[i]);
+        iter_data.collision_cost = iter_data.total_cost;
+        iter_data.smoothness_cost = 0.0f;
+        casadi_history.addIteration(iter_data);
+    }
+
+    casadi_history.final_trajectory = planner_casadi->getCurrentTrajectory();
+    casadi_history.final_cost = task_casadi->computeCollisionCost(casadi_history.final_trajectory);
+    casadi_history.converged = success_casadi;
+    casadi_history.total_iterations = traj_history_casadi.size();
+
+    if (success_casadi) {
+        std::cout << "\n✓ CasADi optimization completed successfully\n";
+    } else {
+        std::cout << "\n✗ CasADi optimization failed\n";
+    }
+
     // =========================================================================
     // VISUALIZATION WITH COST PLOTS
     // =========================================================================
@@ -177,12 +260,21 @@ int main() {
     std::cout << "\nDisplaying NGD cost convergence...\n";
     visualizer.showCostPlot(ngd_history, "NGD - Cost Convergence");
 
+    // Show CasADi trajectory evolution
+    std::cout << "\nDisplaying CasADi trajectory evolution...\n";
+    visualizer.showTrajectoryEvolution(*obstacle_map_ptr, casadi_history, "CasADi - Trajectory Evolution");
+
+    // Show CasADi cost convergence
+    std::cout << "\nDisplaying CasADi cost convergence...\n";
+    visualizer.showCostPlot(casadi_history, "CasADi - Cost Convergence");
+
     // =========================================================================
     // SUMMARY
     // =========================================================================
     std::cout << "\n=================================================\n";
     std::cout << "   Results Summary\n";
     std::cout << "=================================================\n";
+
     std::cout << "PCE Planner:\n";
     std::cout << "  Status: " << (success_pce ? "SUCCESS" : "FAILED") << "\n";
     std::cout << "  Iterations: " << pce_history.total_iterations << "\n";
@@ -194,6 +286,12 @@ int main() {
     std::cout << "  Iterations: " << ngd_history.total_iterations << "\n";
     std::cout << "  Initial cost: " << ngd_history.iterations.front().total_cost << "\n";
     std::cout << "  Final cost: " << ngd_history.final_cost << "\n";
+
+    std::cout << "\nCasADi Planner:\n";
+    std::cout << "  Status: " << (success_casadi ? "SUCCESS" : "FAILED") << "\n";
+    std::cout << "  Iterations: " << casadi_history.total_iterations << "\n";
+    std::cout << "  Initial cost: " << casadi_history.iterations.front().total_cost << "\n";
+    std::cout << "  Final cost: " << casadi_history.final_cost << "\n";
     
     std::cout << "\nUse arrow keys to navigate iterations in the visualizer.\n";
     std::cout << "Press 'P' to save high-resolution PNG.\n";
