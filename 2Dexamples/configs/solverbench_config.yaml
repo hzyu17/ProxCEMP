@@ -1,0 +1,46 @@
+# ==========================================
+# HIGH-LEVEL BENCHMARK CONFIGURATION
+# ==========================================
+# Controls which solvers to benchmark and experiment parameters
+
+benchmark:
+  num_runs: 20
+  start_seed: 0
+  timeout_seconds: 120
+  success_threshold: 10000.0  # Cost below this = success
+
+# Solvers to benchmark
+solvers:
+  pce:
+    enabled: true
+    name: "PCE"
+    
+  ngd:
+    enabled: true
+    name: "NGD"
+    
+  casadi:
+    enabled: true
+    # List of CasADi solver variants to test
+    variants:
+      - name: "IPOPT"
+        solver_key: "ipopt"
+        
+      - name: "ADAM"
+        solver_key: "adam"
+        
+      - name: "LBFGS"
+        solver_key: "lbfgs"
+        
+      - name: "SCP"
+        solver_key: "scp"
+        
+      # Uncomment to add more variants
+      # - name: "SQP"
+      #   solver_key: "sqp"
+
+# Output settings
+output:
+  pickle_path: "benchmark_results.pkl"
+  csv_path: "benchmark_results.csv"
+  summary_path: "benchmark_summary.txt"

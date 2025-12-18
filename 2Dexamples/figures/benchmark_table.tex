@@ -1,0 +1,17 @@
+\begin{table}[htbp]
+\centering
+\caption{Motion Planning Benchmark Results}
+\label{tab:benchmark_results}
+\begin{tabular}{lcccccc}
+\toprule
+Planner & Mean Cost & Std & Best 10\% & Worst 10\% & Time (s) & Success \\
+\midrule
+PCE & 7634.43 & 7049.94 & 1513.57 & 23601.76 & 2.597 & 75.0\% \\
+NGD & 12191.65 & 10275.96 & 1323.94 & 32808.50 & 2.610 & 50.0\% \\
+IPOPT & 11601.63 & 13046.09 & 1815.90 & 45749.96 & 4.782 & 60.0\% \\
+ADAM & 36251.51 & 31131.13 & 1723.32 & 95758.27 & 19.162 & 20.0\% \\
+LBFGS & 11578.76 & 13032.70 & 1614.61 & 45680.11 & 35.990 & 60.0\% \\
+SCP & 11578.76 & 13032.70 & 1614.61 & 45680.11 & 37.774 & 60.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}

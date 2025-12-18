@@ -1,12 +1,49 @@
 casadi_planner:
+  adam:
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1e-8
+    learning_rate: 0.01
   collision_weight: 1.0
   finite_diff_eps: 1e-4
-  max_iterations: 100
+  gradient_descent:
+    learning_rate: 0.01
+    lr_decay: 0.999
+    momentum: 0.9
+    use_nesterov: true
+  ipopt:
+    acceptable_iter: 5
+    acceptable_tol: 1e-4
+    hessian_approximation: limited-memory
+    linear_solver: mumps
+    max_cpu_time: 60.0
+    print_level: 0
+    warm_start_init_point: 'yes'
+  lbfgs:
+    history_size: 10
+  max_iterations: 500
+  scp:
+    accept_ratio: 0.1
+    convergence_tol: 1e-4
+    good_ratio: 0.75
+    inner_max_iter: 50
+    max_outer_iter: 50
+    trust_expand: 2.0
+    trust_region_init: 10.0
+    trust_region_max: 1000.0
+    trust_region_min: 1e-4
+    trust_shrink: 0.5
   solver: ipopt
+  sqp:
+    beta: 0.5
+    c1: 1e-4
+    hessian_approximation: bfgs
+    max_iter_ls: 20
+    qp_solver: qpoases
   tolerance: 1e-6
   verbose_solver: true
 environment:
-  clearance_distance: 0.0
+  clearance_distance: 100.0
   cost:
     epsilon_sdf: 10.0
     sigma_obs: 10.0
@@ -18,8 +55,8 @@ experiment:
   config_file: config.yaml
   enable_logging: true
   log_directory: ./logs
-  random_seed: 1004
-  visualize_initial_state: true
+  random_seed: 19
+  visualize_initial_state: false
 motion_planning:
   goal_position:
   - 750.0
