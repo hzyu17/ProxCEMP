@@ -1,56 +1,54 @@
-# config.yaml
-experiment:
-  config_file: "config.yaml"  # Will be overwritten with actual path
-  random_seed: 777
-  log_directory: "./logs"
-  visualize_initial_state: true
-  enable_logging: true
-
+casadi_planner:
+  collision_weight: 1.0
+  finite_diff_eps: 1e-4
+  max_iterations: 100
+  solver: ipopt
+  tolerance: 1e-6
+  verbose_solver: true
 environment:
-  map_width: 800
-  map_height: 600
-  num_obstacles: 20
-  obstacle_radius: 20.0
   clearance_distance: 0.0
   cost:
     epsilon_sdf: 10.0
     sigma_obs: 10.0
-
+  map_height: 600
+  map_width: 800
+  num_obstacles: 20
+  obstacle_radius: 20.0
+experiment:
+  config_file: config.yaml
+  enable_logging: true
+  log_directory: ./logs
+  random_seed: 1004
+  visualize_initial_state: true
 motion_planning:
+  goal_position:
+  - 750.0
+  - 50.0
+  node_collision_radius: 15.0
   num_dimensions: 2
   num_discretization: 50
+  start_position:
+  - 50.0
+  - 550.0
   total_time: 10.0
-  node_collision_radius: 15.0
-  start_position: [50.0, 550.0]
-  goal_position: [750.0, 50.0]
-
-pce_planner:
-  num_samples: 100
-  num_iterations: 100
-  eta: 1.5                  # This will set gamma to 0.6
-  temperature: 1.5          # Initial broad consensus
-  temperature_final: 0.05   # Late-stage "snap" to the best sample
-  elite_ratio: 0.1
-  ema_alpha: 0.4 
-  covariance_schedule: "cosine" ## options: constant, linear, exponential, cosine, step, adaptive
-  cov_scale_initial: 1.0
-  cov_scale_final: 0.01     # High precision for local refinement
-
 ngd_planner:
-  num_samples: 100
-  num_iterations: 100
-  learning_rate: 0.0001
+  cov_scale_final: 0.05
+  cov_scale_initial: 1.0
+  covariance_schedule: cosine
   ema_alpha: 0.4
+  learning_rate: 0.0001
+  num_iterations: 100
+  num_samples: 100
   temperature: 1.5
   temperature_final: 0.1
-  covariance_schedule: "cosine"
+pce_planner:
+  cov_scale_final: 0.01
   cov_scale_initial: 1.0
-  cov_scale_final: 0.05
-  
-casadi_planner:
-  max_iterations: 100
-  tolerance: 1e-6
-  collision_weight: 1.0
-  solver: "ipopt"
-  finite_diff_eps: 1e-4
-  verbose_solver: true
+  covariance_schedule: cosine
+  elite_ratio: 0.1
+  ema_alpha: 0.4
+  eta: 1.5
+  num_iterations: 100
+  num_samples: 100
+  temperature: 1.5
+  temperature_final: 0.05

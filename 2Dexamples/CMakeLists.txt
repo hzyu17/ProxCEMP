@@ -121,11 +121,13 @@ endif()
 # Executables
 # ============================================================================
 add_executable(main src/main.cpp)
+add_executable(main_mute src/main_mute.cpp)
 add_executable(visualize_collision_checking src/visualize_collision_checking.cpp)
 add_executable(visualize_noisy_trj src/visualize_noisy_trj.cpp)
 
 # Include directories
 target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_include_directories(main_mute PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_include_directories(visualize_collision_checking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_include_directories(visualize_noisy_trj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
@@ -139,9 +141,22 @@ target_link_libraries(main PRIVATE
     ${CASADI_LIBRARY}
     ${PLATFORM_LIBS}
 )
+target_link_libraries(main_mute PRIVATE
+    SFML::System
+    SFML::Window
+    SFML::Graphics
+    ${YAML_CPP_LIB}
+    Eigen3::Eigen
+    ${CASADI_LIBRARY}
+    ${PLATFORM_LIBS}
+)
 
 # Set RPATH so the executable can find CasADi at runtime
 set_target_properties(main PROPERTIES
+    BUILD_RPATH "${CASADI_LIBRARY_DIR}"
+    INSTALL_RPATH "${CASADI_LIBRARY_DIR}"
+)
+set_target_properties(main_mute PROPERTIES
     BUILD_RPATH "${CASADI_LIBRARY_DIR}"
     INSTALL_RPATH "${CASADI_LIBRARY_DIR}"
 )
@@ -167,7 +182,7 @@ target_link_libraries(visualize_noisy_trj PRIVATE
 )
 
 # C++ standard properties
-set_target_properties(main visualize_collision_checking visualize_noisy_trj
+set_target_properties(main main_mute visualize_collision_checking visualize_noisy_trj
     PROPERTIES
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON

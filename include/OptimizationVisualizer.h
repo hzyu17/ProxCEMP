@@ -40,6 +40,55 @@ public:
     }
 
     /**
+     * @brief Non-interactive save of the final trajectory state.
+     * This does NOT open a window and can be called in batch scripts.
+     */
+    void saveStaticPlot(
+        const ObstacleMap& obstacle_map,
+        const Trajectory& final_trajectory,
+        const std::string& filename)
+    {
+        // 1. Create a dummy history object to reuse the existing drawTrajectoryFigure logic
+        OptimizationHistory history;
+        IterationData data;
+        data.iteration = 0;
+        data.mean_trajectory = final_trajectory;
+        data.total_cost = 0.0f; // Could be computed if needed
+        history.addIteration(data);
+
+        // 2. Setup Off-screen Render Texture
+        const float SCALE = 2.0f; // High-res scaling
+        unsigned int w = static_cast<unsigned int>(window_width_ * SCALE);
+        unsigned int h = static_cast<unsigned int>(window_height_ * SCALE);
+
+        sf::RenderTexture rt;
+        if (!rt.resize({w, h})) {
+            std::cerr << "Failed to create off-screen render texture\n";
+            return;
+        }
+
+        // Set view to match coordinate system used in drawTrajectoryFigure
+        sf::View view(sf::FloatRect({0.f, 0.f}, {(float)window_width_, (float)window_height_}));
+        rt.setView(view);
+
+        // 3. Load font for axis labels and text
+        sf::Font font;
+        bool font_loaded = loadFont(font);
+
+        // 4. Render and Save
+        rt.clear(sf::Color::White);
+        // Reuse your existing figure drawing logic
+        drawTrajectoryFigure(rt, obstacle_map, history, 0, false, false, font, font_loaded);
+        rt.display();
+
+        if (rt.getTexture().copyToImage().saveToFile(filename)) {
+            // Only print if not in a tight loop, or handled by Python
+        } else {
+            std::cerr << "Failed to save image: " << filename << std::endl;
+        }
+    }
+
+    /**
      * @brief Set output prefix for saved files (e.g., "pcem" or "ngd")
      */
     void setOutputPrefix(const std::string& prefix) {

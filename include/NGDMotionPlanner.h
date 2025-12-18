@@ -361,9 +361,12 @@ public:
             smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float new_cost = collision_cost + smoothness_cost;
             
-            logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f) LR: %.6f, Temp: %.4f",
-                iteration, new_cost, collision_cost, smoothness_cost, current_lr, current_temp);
-            
+            // --- Every 10 steps ---
+            if (iteration == 1 || iteration % 10 == 0 || iteration == num_iterations_) {
+                logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f) LR: %.6f, Temp: %.4f",
+                    iteration, new_cost, collision_cost, smoothness_cost, current_lr, current_temp);
+            }
+
             if (new_cost < best_cost) {
                 logf("  New best! (previous: %.2f at iteration %zu)", best_cost, best_iteration);
                 best_cost = new_cost;

@@ -4,3 +4,4 @@ ompl-pybullet-env/*
 **/build
 venv/*
 .vscode/*
+**/logs/*
