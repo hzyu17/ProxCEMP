@@ -16,7 +16,7 @@
 
 // Forward declarations
 struct Trajectory;
-struct PathNode;
+struct TrajectoryNode;
 
 namespace pce {
 
@@ -46,9 +46,9 @@ public:
      * @param trajectory The trajectory to evaluate
      * @return The collision cost (0 = collision-free)
      */
-    virtual float computeCollisionCost(const Trajectory& trajectory) const = 0;
+    virtual float computeStateCost(const Trajectory& trajectory) const = 0;
 
-    virtual float computeCollisionCostSimple(const Trajectory& trajectory) const = 0;
+    virtual float computeStateCostSimple(const Trajectory& trajectory) const = 0;
 
     /**
      * @brief Compute collision costs for multiple trajectories (batch processing).
@@ -63,7 +63,7 @@ public:
      * @param trajectories Vector of trajectories to evaluate (typically many samples)
      * @return Vector of collision costs (one per trajectory)
      */
-    virtual std::vector<float> computeCollisionCost(
+    virtual std::vector<float> computeStateCost(
         const std::vector<Trajectory>& trajectories) const 
     {
         // Default implementation: sequential evaluation
@@ -72,13 +72,13 @@ public:
         costs.reserve(trajectories.size());
         
         for (const auto& traj : trajectories) {
-            costs.push_back(computeCollisionCost(traj));
+            costs.push_back(computeStateCost(traj));
         }
         
         return costs;
     }
     
-    virtual std::vector<float> computeCollisionCostSimple(
+    virtual std::vector<float> computeStateCostSimple(
         const std::vector<Trajectory>& trajectories) const 
     {
         // Default implementation: sequential evaluation
@@ -87,7 +87,7 @@ public:
         costs.reserve(trajectories.size());
         
         for (const auto& traj : trajectories) {
-            costs.push_back(computeCollisionCostSimple(traj));
+            costs.push_back(computeStateCostSimple(traj));
         }
         
         return costs;
@@ -151,8 +151,8 @@ public:
      * @param total_time Total trajectory duration
      */
     virtual void initialize(size_t num_dimensions,
-                           const PathNode& start,
-                           const PathNode& goal,
+                           const TrajectoryNode& start,
+                           const TrajectoryNode& goal,
                            size_t num_nodes,
                            float total_time) {
         // Default: do nothing

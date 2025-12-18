@@ -21,13 +21,13 @@ public:
     virtual Eigen::VectorXf compute(const Eigen::VectorXf& config_position) const = 0;
     
     /**
-     * @brief Applies FK to a single PathNode.
+     * @brief Applies FK to a single TrajectoryNode.
      * @param config_node Node in configuration space
      * @return Node in workspace (position transformed, radius preserved)
      */
-    PathNode apply(const PathNode& config_node) const {
+    TrajectoryNode apply(const TrajectoryNode& config_node) const {
         Eigen::VectorXf workspace_pos = compute(config_node.position);
-        return PathNode(workspace_pos, config_node.radius);
+        return TrajectoryNode(workspace_pos, config_node.radius);
     }
     
     /**
@@ -278,29 +278,3 @@ private:
         return T;
     }
 };
-
-/**
- * @brief Factory function to create FK objects
- */
-inline std::shared_ptr<ForwardKinematics> createFK(const std::string& type, 
-                                                   const std::vector<float>& params = {}) {
-    if (type == "identity") {
-        size_t dims = params.empty() ? 2 : static_cast<size_t>(params[0]);
-        return std::make_shared<IdentityFK>(dims);
-    }
-    else if (type == "planar_2link") {
-        if (params.size() < 2) throw std::runtime_error("PlanarArm2Link requires 2 link lengths");
-        return std::make_shared<PlanarArm2LinkFK>(params[0], params[1]);
-    }
-    else if (type == "planar_3link") {
-        if (params.size() < 3) throw std::runtime_error("PlanarArm3Link requires 3 link lengths");
-        return std::make_shared<PlanarArm3LinkFK>(params[0], params[1], params[2]);
-    }
-    else if (type == "spatial_3link") {
-        if (params.size() < 3) throw std::runtime_error("SpatialArm3Link requires 3 link lengths");
-        return std::make_shared<SpatialArm3LinkFK>(params[0], params[1], params[2]);
-    }
-    else {
-        throw std::runtime_error("Unknown FK type: " + type);
-    }
-}

@@ -589,7 +589,7 @@ int main() {
     workspace_noisy_samples.reserve(num_samples);
     
     for (size_t m = 0; m < num_samples; ++m) {
-        workspace_noisy_samples.push_back(fk->apply(config_noisy_samples[m]));
+        workspace_noisy_samples.push_back(config_noisy_samples[m]);
     }
     std::cout << "Workspace transformation complete!\n\n";
 

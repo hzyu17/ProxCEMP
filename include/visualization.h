@@ -31,8 +31,8 @@ void visualizeTrajectory(
     
     // 3. Draw start/goal points
     if (!trajectory.nodes.empty()) {
-        const PathNode& start_node = trajectory.nodes[trajectory.start_index];
-        const PathNode& goal_node = trajectory.nodes[trajectory.goal_index];
+        const TrajectoryNode& start_node = trajectory.nodes[trajectory.start_index];
+        const TrajectoryNode& goal_node = trajectory.nodes[trajectory.goal_index];
         
         drawNode(target, start_node, 6.0f, sf::Color::Green);
         drawNode(target, goal_node, 6.0f, sf::Color::Red);
@@ -100,8 +100,8 @@ void visualizeTrajectoryHistory(
 
     // 4. Draw start/goal points
     if (!final_traj.nodes.empty()) {
-        const PathNode& start_node = final_traj.nodes[final_traj.start_index];
-        const PathNode& goal_node = final_traj.nodes[final_traj.goal_index];
+        const TrajectoryNode& start_node = final_traj.nodes[final_traj.start_index];
+        const TrajectoryNode& goal_node = final_traj.nodes[final_traj.goal_index];
         
         drawNode(target, start_node, 6.0f, sf::Color::Green);
         drawNode(target, goal_node, 6.0f, sf::Color::Red);

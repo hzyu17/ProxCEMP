@@ -153,7 +153,7 @@ pce_planner:
 
 class MyCustomTask : public pce::Task {
 public:
-    float computeCollisionCost(const Trajectory& trajectory) const override {
+    float computeStateCost(const Trajectory& trajectory) const override {
         // Your custom collision cost computation
         float cost = 0.0f;
         // ... implementation ...

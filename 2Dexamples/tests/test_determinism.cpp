@@ -45,7 +45,7 @@ TEST(Determinism, PCEMReproducibleCosts) {
     // ✓ FIRST: Print what's actually stored
     std::cout << "\n=== ACTUAL HISTORY ===\n";
     for (size_t i = 0; i < history.size() && i < 15; ++i) {
-        float collision = planner.computeCollisionCost(history[i], planner.getObstacles());
+        float collision = planner.computeStateCost(history[i], planner.getObstacles());
         float smoothness = planner.computeSmoothnessCost(history[i]);
         float total = collision + smoothness;
         
@@ -77,10 +77,10 @@ TEST(Determinism, PCEMIdenticalRuns) {
     ASSERT_EQ(history1.size(), history2.size());
     
     for (size_t i = 0; i < history1.size(); ++i) {
-        float cost1_collision = planner1.computeCollisionCost(history1[i], planner1.getObstacles());
+        float cost1_collision = planner1.computeStateCost(history1[i], planner1.getObstacles());
         float cost1_smoothness = planner1.computeSmoothnessCost(history1[i]);
         
-        float cost2_collision = planner2.computeCollisionCost(history2[i], planner2.getObstacles());
+        float cost2_collision = planner2.computeStateCost(history2[i], planner2.getObstacles());
         float cost2_smoothness = planner2.computeSmoothnessCost(history2[i]);
         
         EXPECT_FLOAT_EQ(cost1_collision, cost2_collision);
@@ -162,10 +162,10 @@ TEST(Determinism, NGDReproducible) {
     const Trajectory& final1 = history1.back();
     const Trajectory& final2 = history2.back();
     
-    float cost1_collision = planner1.computeCollisionCost(final1, planner1.getObstacles());
+    float cost1_collision = planner1.computeStateCost(final1, planner1.getObstacles());
     float cost1_smoothness = planner1.computeSmoothnessCost(final1);
     
-    float cost2_collision = planner2.computeCollisionCost(final2, planner2.getObstacles());
+    float cost2_collision = planner2.computeStateCost(final2, planner2.getObstacles());
     float cost2_smoothness = planner2.computeSmoothnessCost(final2);
     
     EXPECT_FLOAT_EQ(cost1_collision, cost2_collision);

@@ -7,24 +7,24 @@
  * @brief Represents a single point along the trajectory with a collision checking radius.
  * Pure configuration space representation - no workspace coordinates.
  */
-struct PathNode {
+struct TrajectoryNode {
     Eigen::VectorXf position;  // N-dimensional configuration space position
     float radius;              // Collision checking radius
     
     // Default constructor
-    PathNode() : position(Eigen::VectorXf::Zero(2)), radius(0.0f) {}
+    TrajectoryNode() : position(Eigen::VectorXf::Zero(2)), radius(0.0f) {}
     
     // N-dimensional constructor
-    PathNode(const Eigen::VectorXf& pos, float r) : position(pos), radius(r) {}
+    TrajectoryNode(const Eigen::VectorXf& pos, float r) : position(pos), radius(r) {}
     
     // 2D convenience constructor
-    PathNode(float q1, float q2, float r) : radius(r) {
+    TrajectoryNode(float q1, float q2, float r) : radius(r) {
         position.resize(2);
         position << q1, q2;
     }
     
     // 3D convenience constructor
-    PathNode(float q1, float q2, float q3, float r) : radius(r) {
+    TrajectoryNode(float q1, float q2, float q3, float r) : radius(r) {
         position.resize(3);
         position << q1, q2, q3;
     }
@@ -40,7 +40,7 @@ struct PathNode {
  * Pure configuration space representation.
  */
 struct Trajectory {
-    std::vector<PathNode> nodes;
+    std::vector<TrajectoryNode> nodes;
     float total_time;       // Total time duration of the trajectory (seconds)
     size_t start_index = 0; // Index of the start node (usually 0)
     size_t goal_index;      // Index of the goal node (usually nodes.size() - 1)
@@ -56,9 +56,9 @@ struct Trajectory {
  * @param p1 Start point.
  * @param p2 End point.
  * @param alpha Interpolation parameter (0.0 to 1.0).
- * @return Interpolated point (PathNode).
+ * @return Interpolated point (TrajectoryNode).
  */
-inline PathNode lerp(const PathNode& p1, const PathNode& p2, float alpha) {
+inline TrajectoryNode lerp(const TrajectoryNode& p1, const TrajectoryNode& p2, float alpha) {
     if (p1.dimensions() != p2.dimensions()) {
         throw std::runtime_error("Cannot interpolate PathNodes with different dimensions");
     }
@@ -66,7 +66,7 @@ inline PathNode lerp(const PathNode& p1, const PathNode& p2, float alpha) {
     Eigen::VectorXf position = p1.position + alpha * (p2.position - p1.position);
     float radius = p1.radius + alpha * (p2.radius - p1.radius);
     
-    PathNode result(position, radius);
+    TrajectoryNode result(position, radius);
     return result;
 }
 
@@ -79,8 +79,8 @@ inline PathNode lerp(const PathNode& p1, const PathNode& p2, float alpha) {
  * @param t Parameter (0.0 to 1.0)
  * @return Interpolated point
  */
-inline PathNode cubic_bezier(const PathNode& P0, const PathNode& P1, 
-                             const PathNode& P2, const PathNode& P3, float t) {
+inline TrajectoryNode cubic_bezier(const TrajectoryNode& P0, const TrajectoryNode& P1, 
+                             const TrajectoryNode& P2, const TrajectoryNode& P3, float t) {
     if (P0.dimensions() != P1.dimensions() || 
         P1.dimensions() != P2.dimensions() || 
         P2.dimensions() != P3.dimensions()) {
@@ -107,7 +107,7 @@ inline PathNode cubic_bezier(const PathNode& P0, const PathNode& P1,
     float radius = b0 * P0.radius + b1 * P1.radius + 
                    b2 * P2.radius + b3 * P3.radius;
 
-    return PathNode(position, radius);
+    return TrajectoryNode(position, radius);
 }
 
 /**
@@ -119,8 +119,8 @@ inline PathNode cubic_bezier(const PathNode& P0, const PathNode& P1,
  * @param total_time The total time duration for the trajectory.
  * @return The generated Trajectory structure.
  */
-inline Trajectory generateInterpolatedTrajectoryLinear(const PathNode& start, 
-                                                       const PathNode& goal, 
+inline Trajectory generateInterpolatedTrajectoryLinear(const TrajectoryNode& start, 
+                                                       const TrajectoryNode& goal, 
                                                        size_t num_steps, 
                                                        float total_time) {
     if (num_steps < 2) num_steps = 2;
@@ -136,7 +136,7 @@ inline Trajectory generateInterpolatedTrajectoryLinear(const PathNode& start,
     
     for (size_t i = 0; i < num_steps; ++i) {
         float alpha = static_cast<float>(i) / (num_steps - 1);
-        PathNode node = lerp(start, goal, alpha);
+        TrajectoryNode node = lerp(start, goal, alpha);
         traj.nodes.push_back(node);
     }
 
@@ -152,8 +152,8 @@ inline Trajectory generateInterpolatedTrajectoryLinear(const PathNode& start,
  * @param total_time The total time duration for the trajectory.
  * @return The generated Trajectory structure.
  */
-inline Trajectory generateInterpolatedTrajectoryBezier(const PathNode& start, 
-                                                       const PathNode& goal, 
+inline Trajectory generateInterpolatedTrajectoryBezier(const TrajectoryNode& start, 
+                                                       const TrajectoryNode& goal, 
                                                        size_t num_steps, 
                                                        float total_time) {
     if (num_steps < 2) num_steps = 2;
@@ -197,17 +197,17 @@ inline Trajectory generateInterpolatedTrajectoryBezier(const PathNode& start,
     
     float curve_mag = 0.3f * length;
     
-    PathNode P1(start.position + n * curve_mag + p * curve_mag,
+    TrajectoryNode P1(start.position + n * curve_mag + p * curve_mag,
                 start.radius + 0.33f * (goal.radius - start.radius));
-    PathNode P2(goal.position - n * curve_mag + p * curve_mag,
+    TrajectoryNode P2(goal.position - n * curve_mag + p * curve_mag,
                 start.radius + 0.66f * (goal.radius - start.radius));
 
-    const PathNode& P0 = start;
-    const PathNode& P3 = goal;
+    const TrajectoryNode& P0 = start;
+    const TrajectoryNode& P3 = goal;
 
     for (size_t i = 0; i < num_steps; ++i) {
         float t = static_cast<float>(i) / (num_steps - 1);
-        PathNode node = cubic_bezier(P0, P1, P2, P3, t);
+        TrajectoryNode node = cubic_bezier(P0, P1, P2, P3, t);
         traj.nodes.push_back(node);
     }
     

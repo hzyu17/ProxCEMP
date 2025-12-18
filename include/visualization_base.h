@@ -16,7 +16,7 @@
 // --- Basic Drawing Functions (templated for RenderWindow or RenderTexture) ---
 
 template<typename RenderTarget>
-inline void drawNode(RenderTarget& target, const PathNode& node, float radius, const sf::Color& color) {
+inline void drawNode(RenderTarget& target, const TrajectoryNode& node, float radius, const sf::Color& color) {
     sf::CircleShape circle(radius);
     circle.setFillColor(color);
     circle.setOrigin(sf::Vector2f(radius, radius));
@@ -25,7 +25,7 @@ inline void drawNode(RenderTarget& target, const PathNode& node, float radius, c
 }
 
 template<typename RenderTarget>
-inline void drawNodeCollisionRadius(RenderTarget& target, const PathNode& node, bool in_collision) {
+inline void drawNodeCollisionRadius(RenderTarget& target, const TrajectoryNode& node, bool in_collision) {
     sf::Color status_color = in_collision ? sf::Color::Red : sf::Color::Green;
     
     sf::CircleShape circle(node.radius);

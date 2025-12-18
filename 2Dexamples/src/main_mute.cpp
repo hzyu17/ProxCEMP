@@ -54,7 +54,7 @@ int main() {
         float total_cost = 0.0f;
         if (solve_ok) {
             const auto& final_traj = planner->getCurrentTrajectory();
-            float collision = task_eval->computeCollisionCost(final_traj);
+            float collision = task_eval->computeStateCost(final_traj);
             float smoothness = planner->computeSmoothnessCost(final_traj);
             total_cost = collision + smoothness;
 

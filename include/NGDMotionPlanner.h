@@ -294,7 +294,7 @@ public:
         trajectory_history_.push_back(current_trajectory_);
         
         // Iteration 0: Log initial cost (CONSISTENT WITH PCE)
-        float collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
+        float collision_cost = task_->computeStateCostSimple(current_trajectory_);
         float smoothness_cost = computeSmoothnessCost(current_trajectory_);
         float cost = collision_cost + smoothness_cost;
         
@@ -326,7 +326,7 @@ public:
             }
             
             // Batch evaluate
-            std::vector<float> sample_collisions = task_->computeCollisionCostSimple(sample_trajectories);
+            std::vector<float> sample_collisions = task_->computeStateCostSimple(sample_trajectories);
             
             // Fix invalid costs
             for (size_t m = 0; m < sample_collisions.size(); ++m) {
@@ -354,7 +354,7 @@ public:
             trajectory_history_.push_back(current_trajectory_);
             
             // Compute new cost
-            collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
+            collision_cost = task_->computeStateCostSimple(current_trajectory_);
             smoothness_cost = computeSmoothnessCost(current_trajectory_);
             float new_cost = collision_cost + smoothness_cost;
             
@@ -391,7 +391,7 @@ public:
         // Restore best
         current_trajectory_ = best_trajectory;
         
-        collision_cost = task_->computeCollisionCostSimple(current_trajectory_);
+        collision_cost = task_->computeStateCostSimple(current_trajectory_);
         smoothness_cost = computeSmoothnessCost(current_trajectory_);
         
         logf("\n*** Restoring best trajectory from iteration %zu with cost %.2f ***",

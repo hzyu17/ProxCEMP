@@ -70,7 +70,7 @@ int main() {
         IterationData init_data;
         init_data.iteration = 0;
         init_data.mean_trajectory = planner_pce->getCurrentTrajectory();
-        init_data.total_cost = task_pce->computeCollisionCost(init_data.mean_trajectory);
+        init_data.total_cost = task_pce->computeStateCost(init_data.mean_trajectory);
         init_data.collision_cost = init_data.total_cost;
         init_data.smoothness_cost = 0.0f;  // Or compute if available
         pce_history.addIteration(init_data);
@@ -85,7 +85,7 @@ int main() {
         IterationData iter_data;
         iter_data.iteration = i;
         iter_data.mean_trajectory = traj_history_pce[i];
-        iter_data.total_cost = task_pce->computeCollisionCost(traj_history_pce[i]);
+        iter_data.total_cost = task_pce->computeStateCost(traj_history_pce[i]);
         iter_data.collision_cost = iter_data.total_cost;
         iter_data.smoothness_cost = 0.0f;
         // Note: samples not available from history, leave empty
@@ -93,7 +93,7 @@ int main() {
     }
     
     pce_history.final_trajectory = planner_pce->getCurrentTrajectory();
-    pce_history.final_cost = task_pce->computeCollisionCost(pce_history.final_trajectory);
+    pce_history.final_cost = task_pce->computeStateCost(pce_history.final_trajectory);
     pce_history.converged = success_pce;
     pce_history.total_iterations = traj_history_pce.size();
 
@@ -143,14 +143,14 @@ int main() {
         IterationData iter_data;
         iter_data.iteration = i;
         iter_data.mean_trajectory = traj_history_ngd[i];
-        iter_data.total_cost = task_ngd->computeCollisionCost(traj_history_ngd[i]);
+        iter_data.total_cost = task_ngd->computeStateCost(traj_history_ngd[i]);
         iter_data.collision_cost = iter_data.total_cost;
         iter_data.smoothness_cost = 0.0f;
         ngd_history.addIteration(iter_data);
     }
 
     ngd_history.final_trajectory = planner_ngd->getCurrentTrajectory();
-    ngd_history.final_cost = task_ngd->computeCollisionCost(ngd_history.final_trajectory);
+    ngd_history.final_cost = task_ngd->computeStateCost(ngd_history.final_trajectory);
     ngd_history.converged = success_ngd;
     ngd_history.total_iterations = traj_history_ngd.size();
 
@@ -204,7 +204,7 @@ int main() {
         IterationData init_data;
         init_data.iteration = 0;
         init_data.mean_trajectory = planner_casadi->getCurrentTrajectory();
-        init_data.total_cost = task_casadi->computeCollisionCost(init_data.mean_trajectory);
+        init_data.total_cost = task_casadi->computeStateCost(init_data.mean_trajectory);
         init_data.collision_cost = init_data.total_cost;
         init_data.smoothness_cost = 0.0f;
         casadi_history.addIteration(init_data);
@@ -219,14 +219,14 @@ int main() {
         IterationData iter_data;
         iter_data.iteration = i;
         iter_data.mean_trajectory = traj_history_casadi[i];
-        iter_data.total_cost = task_casadi->computeCollisionCost(traj_history_casadi[i]);
+        iter_data.total_cost = task_casadi->computeStateCost(traj_history_casadi[i]);
         iter_data.collision_cost = iter_data.total_cost;
         iter_data.smoothness_cost = 0.0f;
         casadi_history.addIteration(iter_data);
     }
 
     casadi_history.final_trajectory = planner_casadi->getCurrentTrajectory();
-    casadi_history.final_cost = task_casadi->computeCollisionCost(casadi_history.final_trajectory);
+    casadi_history.final_cost = task_casadi->computeStateCost(casadi_history.final_trajectory);
     casadi_history.converged = success_casadi;
     casadi_history.total_iterations = traj_history_casadi.size();
 
@@ -277,7 +277,7 @@ int main() {
 
     // Define a lambda for consistent evaluation using the same task logic
     auto evaluate_final = [&](const Trajectory& traj) {
-        float collision = task_pce->computeCollisionCost(traj);
+        float collision = task_pce->computeStateCost(traj);
         float smoothness = planner_pce->computeSmoothnessCost(traj); // Smoothness logic is usually in the base planner
         return std::make_pair(collision + smoothness, collision);
     };

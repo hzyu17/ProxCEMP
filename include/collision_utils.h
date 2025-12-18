@@ -7,7 +7,7 @@
 /**
  * @brief Checks if a node is in collision with any obstacle
  */
-inline bool isNodeInCollision(const PathNode& node, const std::vector<ObstacleND>& obstacles) {
+inline bool isNodeInCollision(const TrajectoryNode& node, const std::vector<ObstacleND>& obstacles) {
     for (const auto& obs : obstacles) {
         if (node.dimensions() != obs.dimensions()) {
             continue;

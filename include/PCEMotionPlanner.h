@@ -70,23 +70,6 @@ struct PCEConfig : public MotionPlannerConfig {
                 if (pce["ema_alpha"]) ema_alpha = pce["ema_alpha"].as<float>();
                 if (pce["collision_clearance"]) collision_clearance = pce["collision_clearance"].as<float>();
                 if (pce["collision_threshold"]) collision_threshold = pce["collision_threshold"].as<float>();
-                
-                // // Covariance Schedule
-                // if (pce["covariance_schedule"]) {
-                //     std::string s = pce["covariance_schedule"].as<std::string>();
-                //     if (s == "constant") cov_schedule = CovarianceSchedule::CONSTANT;
-                //     else if (s == "linear") cov_schedule = CovarianceSchedule::LINEAR;
-                //     else if (s == "exponential") cov_schedule = CovarianceSchedule::EXPONENTIAL;
-                //     else if (s == "cosine") cov_schedule = CovarianceSchedule::COSINE;
-                //     else if (s == "step") cov_schedule = CovarianceSchedule::STEP;
-                //     else if (s == "adaptive") cov_schedule = CovarianceSchedule::ADAPTIVE;
-                // }
-                
-                // if (pce["cov_scale_initial"]) cov_scale_initial = pce["cov_scale_initial"].as<float>();
-                // if (pce["cov_scale_final"])   cov_scale_final = pce["cov_scale_final"].as<float>();
-                // if (pce["cov_decay_rate"])    cov_decay_rate = pce["cov_decay_rate"].as<float>();
-                // if (pce["cov_step_interval"]) cov_step_interval = pce["cov_step_interval"].as<size_t>();
-                // if (pce["cov_step_factor"])   cov_step_factor = pce["cov_step_factor"].as<float>();
             }
             return validate();
         } catch (const std::exception& e) {
@@ -256,81 +239,13 @@ public:
     /**
      * @brief Override collision cost computation to use Task
      */
-    float computeCollisionCost(const Trajectory& trajectory) const override {
+    float computeStateCost(const Trajectory& trajectory) const override {
         if (!task_) {
             std::cerr << "Error: No task set for collision cost computation\n";
             return std::numeric_limits<float>::infinity();
         }
-        return task_->computeCollisionCost(trajectory);
+        return task_->computeStateCost(trajectory);
     }
-    
-    // /**
-    //  * @brief Compute covariance scale for given iteration
-    //  * @param iteration Current iteration (1-indexed)
-    //  * @param prev_cost Previous iteration cost (for adaptive schedule)
-    //  * @param curr_cost Current iteration cost (for adaptive schedule)
-    //  * @return Covariance scale factor
-    //  */
-    // float computeCovarianceScale(size_t iteration, float prev_cost = 0.0f, float curr_cost = 0.0f) {
-    //     float t = static_cast<float>(iteration - 1);  // 0-indexed for formulas
-    //     float T = static_cast<float>(num_iterations_);
-        
-    //     switch (cov_schedule_) {
-    //         case CovarianceSchedule::CONSTANT:
-    //             return cov_scale_initial_;
-                
-    //         case CovarianceSchedule::LINEAR:
-    //             // Linear interpolation from initial to final
-    //             return cov_scale_initial_ + (cov_scale_final_ - cov_scale_initial_) * (t / T);
-                
-    //         case CovarianceSchedule::EXPONENTIAL:
-    //             // Exponential decay: σ(t) = σ_init * α^t
-    //             // Optionally clamp to final value
-    //             return std::max(cov_scale_final_, 
-    //                            cov_scale_initial_ * std::pow(cov_decay_rate_, t));
-                
-    //         case CovarianceSchedule::COSINE:
-    //             // Cosine annealing (smooth transition)
-    //             return cov_scale_final_ + 0.5f * (cov_scale_initial_ - cov_scale_final_) * 
-    //                    (1.0f + std::cos(M_PI * t / T));
-                
-    //         case CovarianceSchedule::STEP:
-    //             // Step decay: reduce by factor every k iterations
-    //             {
-    //                 size_t num_steps = (iteration - 1) / cov_step_interval_;
-    //                 float scale = cov_scale_initial_ * std::pow(cov_step_factor_, 
-    //                                                              static_cast<float>(num_steps));
-    //                 return std::max(cov_scale_final_, scale);
-    //             }
-                
-    //         case CovarianceSchedule::ADAPTIVE:
-    //             // Adaptive: reduce if cost improved, else keep or increase slightly
-    //             {
-    //                 if (iteration <= 1) {
-    //                     return cov_scale_current_;
-    //                 }
-                    
-    //                 float improvement = (prev_cost - curr_cost) / (std::abs(prev_cost) + 1e-6f);
-                    
-    //                 if (improvement > cov_adaptive_threshold_) {
-    //                     // Good improvement - reduce covariance to focus search
-    //                     cov_scale_current_ *= cov_decay_rate_;
-    //                 } else if (improvement < 0) {
-    //                     // Cost increased - slightly increase covariance to explore more
-    //                     cov_scale_current_ *= (1.0f + 0.1f * (1.0f - cov_decay_rate_));
-    //                 }
-    //                 // else: small improvement - keep current scale
-                    
-    //                 // Clamp to bounds
-    //                 cov_scale_current_ = std::max(cov_scale_final_, 
-    //                                               std::min(cov_scale_initial_, cov_scale_current_));
-    //                 return cov_scale_current_;
-    //             }
-                
-    //         default:
-    //             return cov_scale_initial_;
-    //     }
-    // }
 
     /**
      * @brief Sample noise matrices with covariance scaling
@@ -406,7 +321,7 @@ public:
                 sample_trajectories.push_back(createPerturbedTrajectory(Y_k, epsilon_samples[m]));
             }
             
-            std::vector<float> sample_collisions = task_->computeCollisionCostSimple(sample_trajectories);
+            std::vector<float> sample_collisions = task_->computeStateCostSimple(sample_trajectories);
 
             // 3. Elite Selection
             std::vector<size_t> indices(M);
@@ -458,7 +373,7 @@ public:
             task_->filterTrajectory(current_trajectory_, iteration);
 
             // 8. Logging and Convergence
-            float current_collision = task_->computeCollisionCostSimple(current_trajectory_);
+            float current_collision = task_->computeStateCostSimple(current_trajectory_);
             float current_smoothness = computeSmoothnessCost(current_trajectory_);
             float current_total_cost = current_collision + current_smoothness;
 

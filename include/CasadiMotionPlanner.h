@@ -470,12 +470,12 @@ public:
         return casadi_config_;
     }
     
-    float computeCollisionCost(const Trajectory& trajectory) const override {
+    float computeStateCost(const Trajectory& trajectory) const override {
         if (!task_) {
             std::cerr << "Error: No task set for collision cost computation\n";
             return std::numeric_limits<float>::infinity();
         }
-        return task_->computeCollisionCost(trajectory);
+        return task_->computeStateCost(trajectory);
     }
     
     bool optimize() override {
@@ -486,7 +486,7 @@ public:
         
         log("\n--- Starting CasADi Optimization ---");
         logf("Solver: %s", solverTypeToString(solver_type_).c_str());
-        log("Formulation: min J_smooth(Y) + w_c * J_collision(Y)\n");
+        log("Formulation: min J_smooth(Y) + w_c * J_state(Y)\n");
         
         const size_t N = current_trajectory_.nodes.size();
         const size_t D = num_dimensions_;
@@ -504,7 +504,7 @@ public:
         trajectory_history_.clear();
         trajectory_history_.push_back(current_trajectory_);
         
-        float initial_collision = task_->computeCollisionCostSimple(current_trajectory_);
+        float initial_collision = task_->computeStateCostSimple(current_trajectory_);
         float initial_smoothness = computeSmoothnessCost(current_trajectory_);
         logf("Initial - Collision: %.4f, Smoothness: %.4f, Total: %.4f",
              initial_collision, initial_smoothness, 
@@ -556,7 +556,7 @@ public:
         
         trajectory_history_.push_back(current_trajectory_);
         
-        float final_collision = task_->computeCollisionCostSimple(current_trajectory_);
+        float final_collision = task_->computeStateCostSimple(current_trajectory_);
         float final_smoothness = computeSmoothnessCost(current_trajectory_);
         float final_cost = final_collision * collision_weight_ + final_smoothness;
         
@@ -592,6 +592,82 @@ protected:
         logf("  Finite diff epsilon:  %.6f", finite_diff_eps_);
         log("");
     }
+
+
+    /**
+     * @brief Perturb the current trajectory for testing
+     * 
+     * Call after initialize() but before solve() to test optimization
+     * from a non-optimal starting point.
+     * 
+     * @param amplitude Maximum perturbation amplitude
+     * @param seed Random seed for reproducibility (0 = use time-based)
+     */
+    void perturbTrajectory(float amplitude = 2.0f, unsigned int seed = 42) {
+        if (current_trajectory_.nodes.empty()) {
+            std::cerr << "Warning: Cannot perturb empty trajectory\n";
+            return;
+        }
+        
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        
+        size_t N = current_trajectory_.nodes.size();
+        
+        for (size_t i = 1; i < N - 1; ++i) {
+            float t = static_cast<float>(i) / (N - 1);
+            float envelope = std::sin(M_PI * t);  // Zero at endpoints, max at middle
+            
+            for (size_t d = 0; d < num_dimensions_; ++d) {
+                float pert = amplitude * envelope * dist(rng);
+                current_trajectory_.nodes[i].position(d) += pert;
+            }
+        }
+        
+        // Update trajectory history
+        trajectory_history_.push_back(current_trajectory_);
+        
+        if (verbose_solver_) {
+            log("Trajectory perturbed with amplitude " + std::to_string(amplitude));
+        }
+    }
+
+    /**
+     * @brief Set a custom initial trajectory
+     * 
+     * @param trajectory The trajectory to use as initial guess
+     * @return true if trajectory is valid and was set
+     */
+    bool setInitialTrajectory(const Trajectory& trajectory) {
+        if (trajectory.nodes.size() != num_nodes_) {
+            std::cerr << "Error: Trajectory has " << trajectory.nodes.size() 
+                    << " nodes, expected " << num_nodes_ << "\n";
+            return false;
+        }
+        
+        if (trajectory.nodes[0].position.size() != static_cast<long>(num_dimensions_)) {
+            std::cerr << "Error: Trajectory dimension mismatch\n";
+            return false;
+        }
+        
+        current_trajectory_ = trajectory;
+        
+        // Ensure boundary conditions are satisfied
+        current_trajectory_.nodes[0].position = start_node_.position;
+        current_trajectory_.nodes[num_nodes_ - 1].position = goal_node_.position;
+        
+        trajectory_history_.push_back(current_trajectory_);
+        
+        return true;
+    }
+
+    /**
+     * @brief Get mutable reference to current trajectory (for advanced manipulation)
+     */
+    Trajectory& getMutableTrajectory() {
+        return current_trajectory_;
+    }
+
 
 private:
     pce::TaskPtr task_;
@@ -739,8 +815,8 @@ private:
             Trajectory traj_plus = vectorToTrajectory(x_plus);
             Trajectory traj_minus = vectorToTrajectory(x_minus);
             
-            double f_plus = task_->computeCollisionCostSimple(traj_plus);
-            double f_minus = task_->computeCollisionCostSimple(traj_minus);
+            double f_plus = task_->computeStateCostSimple(traj_plus);
+            double f_minus = task_->computeStateCostSimple(traj_minus);
             
             grad_collision[i] = (f_plus - f_minus) / (2.0 * finite_diff_eps_);
         }
@@ -756,7 +832,7 @@ private:
         double smooth_cost = static_cast<double>(result[0].scalar());
         
         Trajectory traj = vectorToTrajectory(x);
-        double coll_cost = task_->computeCollisionCostSimple(traj);
+        double coll_cost = task_->computeStateCostSimple(traj);
         
         return smooth_cost + collision_weight_ * coll_cost;
     }
@@ -774,7 +850,7 @@ private:
         std::vector<double> grad_smooth = smooth_result[1].get_elements();
         
         Trajectory current_traj = vectorToTrajectory(x);
-        collision_cost_out = task_->computeCollisionCostSimple(current_traj);
+        collision_cost_out = task_->computeStateCostSimple(current_traj);
         
         std::vector<double> grad_collision;
         computeCollisionGradient(x, grad_collision);
@@ -822,7 +898,7 @@ private:
         for (int outer = 0; outer < scp_max_outer_iter_; ++outer) {
             // Compute collision gradient at current point
             Trajectory traj_k = vectorToTrajectory(x_k);
-            double coll_k = task_->computeCollisionCostSimple(traj_k);
+            double coll_k = task_->computeStateCostSimple(traj_k);
             
             std::vector<double> grad_coll_k;
             computeCollisionGradient(x_k, grad_coll_k);
@@ -916,7 +992,7 @@ private:
             
             if (verbose_solver_) {
                 Trajectory traj_trial = vectorToTrajectory(x_trial);
-                double coll_trial = task_->computeCollisionCostSimple(traj_trial);
+                double coll_trial = task_->computeStateCostSimple(traj_trial);
                 DM x_trial_dm = DM(x_trial);
                 std::vector<DM> smooth_trial = smooth_func(std::vector<DM>{x_trial_dm});
                 double smooth_trial_cost = static_cast<double>(smooth_trial[0].scalar());
@@ -990,7 +1066,7 @@ private:
         
         for (int outer = 0; outer < scp_max_outer_iter_; ++outer) {
             Trajectory traj_k = vectorToTrajectory(x_k);
-            double coll_k = task_->computeCollisionCostSimple(traj_k);
+            double coll_k = task_->computeStateCostSimple(traj_k);
             
             std::vector<double> grad_coll_k;
             computeCollisionGradient(x_k, grad_coll_k);
