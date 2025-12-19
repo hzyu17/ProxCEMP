@@ -49,7 +49,7 @@ environment:
   clearance_distance: 100.0
   cost:
     epsilon_sdf: 10.0
-    sigma_obs: 10.0
+    sigma_obs: 1.0
   map_height: 600
   map_width: 800
   num_obstacles: 20
@@ -68,7 +68,7 @@ motion_planning:
     - 50.0
   node_collision_radius: 15.0
   num_dimensions: 2
-  num_discretization: 50
+  num_discretization: 500
   start_position:
     - 50.0
     - 550.0
@@ -78,8 +78,8 @@ ngd_planner:
   cov_scale_final: 0.01
   cov_scale_initial: 1.0
   covariance_schedule: cosine
-  ema_alpha: 0.2
-  learning_rate: 1e-5
+  ema_alpha: 0.5
+  learning_rate: 1e-4
   num_iterations: 50
   num_samples: 100
   temperature: 1.5
@@ -96,3 +96,33 @@ pce_planner:
   num_samples: 1000
   temperature: 1.5
   temperature_final: 0.05
+
+
+stomp:
+  # Core STOMP parameters
+  num_iterations: 100           # Maximum number of optimization iterations
+  num_rollouts: 10              # Number of noisy trajectories per iteration
+  max_rollouts: 20              # Maximum rollouts to keep (must be > num_rollouts)
+  num_iterations_after_valid: 5 # Continue iterations after finding valid solution
+  
+  # Time discretization
+  delta_t: 0.1                  # Time step between waypoints (seconds)
+  
+  # Cost weights
+  control_cost_weight: 0.0      # Weight for control (acceleration) cost
+                                # Set to 0 to focus on collision avoidance only
+                                # Increase (e.g., 0.1-1.0) for smoother trajectories
+  
+  # Probability computation
+  exponentiated_cost_sensitivity: 10.0  # h parameter in exp(-h * cost)
+                                         # Higher = more greedy selection
+                                         # Lower = more exploration
+  
+  # Noise generation
+  noise_stddev: 20.0            # Initial noise standard deviation
+  noise_decay: 0.95             # Noise decay factor per iteration
+                                # noise(iter) = noise_stddev * decay^iter
+  
+  # Convergence
+  cost_tolerance: 1e-4          # Convergence tolerance for cost improvement
+
