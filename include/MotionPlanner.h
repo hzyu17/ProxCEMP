@@ -232,6 +232,21 @@ public:
     }
 
     float computeSmoothnessCost(const Trajectory& traj) const {
+        // Find position scale
+        float max_abs = 0.0f;
+        for (const auto& node : traj.nodes) {
+            max_abs = std::max(max_abs, node.position.cwiseAbs().maxCoeff());
+        }
+        float scale_sq = std::max(max_abs * max_abs, 1e-6f);
+        
+        // Compute raw cost
+        float raw_cost = computeUnNormalizedSmoothnessCost(traj);
+        
+        // Normalize
+        return raw_cost / scale_sq;
+    }
+
+    float computeUnNormalizedSmoothnessCost(const Trajectory& traj) const {
         if (traj.nodes.size() < 3) return 0.0f;
         float total_cost = 0.0f;
         for (size_t d = 0; d < num_dimensions_; ++d) {
@@ -390,20 +405,37 @@ protected:
             return; 
         }
         
-        // Work in normalized time s ∈ [0,1], ds = 1/(n-1)
-        // Scale = 1/ds³ = (n-1)³
-        // This makes cost independent of both T and n
-        float scale = std::pow(static_cast<float>(n - 1), 3);
+        // Interior method: R = (1/ds³) * D^T D where D is (n-2) x n
+        // This gives boundary-aware coefficients that converge properly
+        float ds = 1.0f / (n - 1);
+        float scale = 1.0f / (ds * ds * ds);  // = (n-1)³
+        
+        // Small regularization for numerical stability (matrix is rank n-2)
+        float regularization = 1e-6f * scale;
         
         std::vector<Eigen::Triplet<float>> triplets;
         triplets.reserve(5 * n);
         
         for (size_t i = 0; i < n; ++i) {
-            triplets.emplace_back(i, i, 6.0f * scale);
-            if (i + 1 < n) {
-                triplets.emplace_back(i, i + 1, -4.0f * scale);
-                triplets.emplace_back(i + 1, i, -4.0f * scale);
+            // Boundary-aware diagonal: [1, 5, 6, 6, ..., 6, 5, 1]
+            float diag;
+            if (i == 0 || i == n - 1) {
+                diag = 1.0f;
+            } else if (i == 1 || i == n - 2) {
+                diag = 5.0f;
+            } else {
+                diag = 6.0f;
             }
+            triplets.emplace_back(i, i, diag * scale + regularization);
+            
+            // First off-diagonal: [-2, -4, -4, ..., -4, -2]
+            if (i + 1 < n) {
+                float val = (i == 0 || i == n - 2) ? -2.0f : -4.0f;
+                triplets.emplace_back(i, i + 1, val * scale);
+                triplets.emplace_back(i + 1, i, val * scale);
+            }
+            
+            // Second off-diagonal: [1, 1, ..., 1]
             if (i + 2 < n) {
                 triplets.emplace_back(i, i + 2, 1.0f * scale);
                 triplets.emplace_back(i + 2, i, 1.0f * scale);

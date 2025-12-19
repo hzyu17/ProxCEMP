@@ -44,7 +44,7 @@ include_directories(SYSTEM ${CASADI_INCLUDE_DIR})
 link_directories(${CASADI_LIBRARY_DIR})
 
 # --- Executables and Linking ---
-set(ALL_TARGETS main main_mute test_solvers cart_pole visualize_collision_checking visualize_noisy_trj)
+set(ALL_TARGETS main main_mute test_solvers test_R cart_pole visualize_collision_checking visualize_noisy_trj)
 
 foreach(exe ${ALL_TARGETS})
     add_executable(${exe} src/${exe}.cpp)

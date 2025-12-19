@@ -310,10 +310,6 @@ public:
         const float alpha = 0.99f;
         const float alpha_temp = 1.01f;
 
-        /**
-         * @brief Modifications =======================================
-         * 
-         */
         float current_lr = initial_learning_rate;
         float best_cost = std::numeric_limits<float>::infinity();
         size_t best_iteration = 0;
@@ -322,7 +318,6 @@ public:
         // Reset history
         trajectory_history_.clear();
         covariance_scale_history_.clear();
-        // ============================================================
 
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
@@ -387,7 +382,7 @@ public:
             
             task_->postIteration(iteration, current_total_cost, current_trajectory_);
         }
-        
+
         current_trajectory_ = trajectory_history_[best_iteration];
         task_->done(true, num_iterations_, best_cost, current_trajectory_);
         return true;
