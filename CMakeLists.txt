@@ -10,6 +10,8 @@ find_package(Eigen3 REQUIRED)
 
 find_package(CASADI REQUIRED)
 
+find_package(OpenMP REQUIRED)
+
 # Include Casadi headers
 include_directories(${CASADI_INCLUDE_DIRS})
 
@@ -24,7 +26,7 @@ target_include_directories(pce_motion_planner INTERFACE
 )
 
 # Link Eigen3
-target_link_libraries(pce_motion_planner INTERFACE Eigen3::Eigen ${CASADI_LIBRARIES})
+target_link_libraries(pce_motion_planner INTERFACE Eigen3::Eigen ${CASADI_LIBRARIES} OpenMP::OpenMP_CXX)
 
 # Installation rules
 include(GNUInstallDirs)

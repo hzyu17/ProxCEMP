@@ -92,7 +92,6 @@ public:
         
         return costs;
     }
-    
 
     /**
      * @brief Filter a trajectory to satisfy constraints (e.g., joint limits).

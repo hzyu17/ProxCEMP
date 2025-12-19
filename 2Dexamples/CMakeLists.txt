@@ -3,6 +3,7 @@ project(2DExample CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(OpenMP REQUIRED)
 
 # --- Platform-specific configuration ---
 if(APPLE)
@@ -51,8 +52,12 @@ foreach(exe ${ALL_TARGETS})
     target_include_directories(${exe} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../examples)
     
     # Base libraries
-    target_link_libraries(${exe} PRIVATE SFML::System SFML::Window SFML::Graphics ${YAML_CPP_LIB} Eigen3::Eigen ${PLATFORM_LIBS} ${CASADI_LIBRARY})
+    target_link_libraries(${exe} PRIVATE SFML::System SFML::Window SFML::Graphics ${YAML_CPP_LIB} Eigen3::Eigen ${PLATFORM_LIBS} ${CASADI_LIBRARY} OpenMP::OpenMP_CXX)
 
+    target_compile_options(${exe} PRIVATE 
+        -O3 -march=native -ffast-math
+    )
+    
     # CasADi specific (main targets only)
     if(exe MATCHES "main")
         target_link_libraries(${exe} PRIVATE ${CASADI_LIBRARY})
