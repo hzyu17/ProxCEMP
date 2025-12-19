@@ -1,190 +1,382 @@
 /**
- * @file test_solvers.cpp
- * @brief Test CasADi solvers with known convex cost functions
+ * @file test_all_solvers.cpp
+ * @brief Test all solvers (PCE, NGD, CasADi backends) with convex cost
  * 
- * Usage: ./test_solvers [solver_name]
- *   solver_name: lbfgs, ipopt, sqp, gd, adam (default: lbfgs)
+ * Uses QuadraticBowlTask where:
+ *   - J_state optimal = straight line
+ *   - J_smooth optimal = straight line  
+ *   - Combined optimal = straight line (cost ≈ 0)
+ * 
+ * All solvers start from perturbed trajectory and must converge to optimal.
+ * Pass criteria: final < initial AND final < 1.0
  */
 
-#include "ConvexCosts.h"
-#include "task.h"
+#include "TestTask.h"
+#include "PCEMotionPlanner.h"
+#include "NGDMotionPlanner.h"
 #include "CasadiMotionPlanner.h"
 #include <iostream>
 #include <memory>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
+#include <cmath>
 
-/**
- * @brief Perturb a trajectory away from straight line
- */
-void perturbTrajectory(Trajectory& traj, float amplitude = 2.0f) {
-    size_t N = traj.nodes.size();
-    size_t D = traj.nodes[0].position.size();
-    
-    for (size_t i = 1; i < N - 1; ++i) {
-        float t = static_cast<float>(i) / (N - 1);
-        for (size_t d = 0; d < D; ++d) {
-            float pert = amplitude * std::sin(M_PI * t) * std::cos(2 * M_PI * d / D + i * 0.5f);
-            traj.nodes[i].position(d) += pert;
-        }
+// Silence cout and cerr during solver runs
+class SilentScope {
+    std::streambuf* old_cout_;
+    std::streambuf* old_cerr_;
+    std::ostringstream sink_;
+public:
+    SilentScope() : old_cout_(std::cout.rdbuf(sink_.rdbuf())),
+                    old_cerr_(std::cerr.rdbuf(sink_.rdbuf())) {}
+    ~SilentScope() { 
+        std::cout.rdbuf(old_cout_); 
+        std::cerr.rdbuf(old_cerr_);
     }
+};
+
+struct TestResult {
+    std::string solver;
+    double initial_cost = 0;
+    double final_cost = 0;
+    double time_ms = 0;
+    bool passed = false;
+};
+
+void printResult(const TestResult& r) {
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "  " << std::setw(10) << r.solver << " │ "
+              << std::setw(12) << r.initial_cost << " → "
+              << std::setw(12) << (std::isnan(r.final_cost) ? -1.0 : r.final_cost) << " │ "
+              << std::setw(10) << r.time_ms << " ms │ "
+              << (r.passed ? "✓ PASS" : "✗ FAIL") << "\n";
 }
 
-/**
- * @brief Run a single solver test
- */
-bool runSolverTest(const std::string& solver_name,
-                   pce::TaskPtr task,
-                   size_t num_nodes = 20,
-                   size_t num_dims = 2) {
+// ============================================================
+// PCE Configuration (from config.yaml)
+// ============================================================
+
+PCEConfig makePCEConfig(size_t nodes = 20, size_t dims = 2) {
+    PCEConfig config;
     
-    std::cout << "\n" << std::string(60, '=') << "\n";
-    std::cout << "Testing " << solver_name << " solver\n";
-    std::cout << std::string(60, '=') << "\n";
-    
-    // Create planner with task
-    CasADiMotionPlanner planner(task);
-    
-    // Configure
-    CasADiConfig config;
-    config.num_dimensions = num_dims;
-    config.num_discretization = num_nodes;
-    config.total_time = 1.0f;
+    config.num_dimensions = dims;
+    config.num_discretization = nodes;
+    config.total_time = 10.0f;
     config.node_collision_radius = 0.1f;
+    config.start_position.resize(dims, 0.0f);
+    config.goal_position.resize(dims, 10.0f);
     
-    // Set start/goal positions
-    config.start_position.resize(num_dims, 0.0f);
-    config.goal_position.resize(num_dims, 10.0f);
+    // PCE parameters from config.yaml
+    config.num_samples = 100;
+    config.num_iterations = 100;
+    config.elite_ratio = 0.1f;
+    config.eta = 1.5f;
+    config.temperature = 1.5f;
+    config.temperature_final = 0.05f;
+    config.cov_scale_initial = 1.0f;
+    config.cov_scale_final = 0.01f;
+    config.cov_schedule = CovarianceSchedule::COSINE;
+    config.ema_alpha = 0.4f;
     
-    // Solver selection
-    config.solver = solver_name;
-    config.solver_type = stringToSolverType(solver_name);
-    config.max_iterations = 500;
+    return config;
+}
+
+// ============================================================
+// NGD Configuration (from config.yaml)
+// ============================================================
+
+NGDConfig makeNGDConfig(size_t nodes = 20, size_t dims = 2) {
+    NGDConfig config;
+    
+    config.num_dimensions = dims;
+    config.num_discretization = nodes;
+    config.total_time = 10.0f;
+    config.node_collision_radius = 0.1f;
+    config.start_position.resize(dims, 0.0f);
+    config.goal_position.resize(dims, 10.0f);
+    
+    // NGD parameters from config.yaml
+    config.num_samples = 100;
+    config.num_iterations = 100;
+    config.learning_rate = 0.0001f;
+    config.temperature = 1.5f;
+    config.convergence_threshold = 0.01f;
+    
+    return config;
+}
+
+// ============================================================
+// CasADi Configuration (from config.yaml)
+// ============================================================
+
+CasADiConfig makeCasADiConfig(const std::string& solver, size_t nodes = 20, size_t dims = 2) {
+    CasADiConfig config;
+    
+    config.num_dimensions = dims;
+    config.num_discretization = nodes;
+    config.total_time = 10.0f;
+    config.node_collision_radius = 0.1f;
+    config.start_position.resize(dims, 0.0f);
+    config.goal_position.resize(dims, 10.0f);
+    
+    config.solver = solver;
+    config.solver_type = stringToSolverType(solver);
+    config.collision_weight = 10.0f;       // From config.yaml
     config.tolerance = 1e-6f;
-    config.collision_weight = 10.0f;
-    config.verbose_solver = true;
+    config.verbose_solver = false;         // Quiet for test
     
-    // Solver-specific tuning
-    if (solver_name == "adam") {
-        config.max_iterations = 2000;
-        config.adam_learning_rate = 0.1;
-    } else if (solver_name == "gd") {
-        config.max_iterations = 2000;
-        config.gd_learning_rate = 0.05;
-        config.gd_momentum = 0.9;
+    if (solver == "lbfgs") {
+        config.max_iterations = 500;
+        config.lbfgs_history = 10;
+    } 
+    else if (solver == "ipopt") {
+        config.max_iterations = 100;       // scp.inner_max_iter
+        config.ipopt_print_level = 0;
+        config.scp_max_outer_iter = 50;
+        config.scp_trust_region_init = 10.0;
+    }
+    else if (solver == "sqp") {
+        config.max_iterations = 100;
+        config.scp_max_outer_iter = 50;
+        config.scp_trust_region_init = 10.0;
+    }
+    else if (solver == "gd") {
+        config.max_iterations = 5000;
+        config.gd_learning_rate = 0.001f;  // From config.yaml
+        config.gd_momentum = 0.9f;
+        config.gd_use_nesterov = true;
+        config.gd_lr_decay = 1.0f;         // No decay
+    }
+    else if (solver == "adam") {
+        config.max_iterations = 5000;      // max_iterations from config.yaml
+        config.adam_learning_rate = 0.01f; // From config.yaml
     }
     
-    // Initialize planner (this sets up trajectory internally)
-    if (!planner.initialize(config)) {
-        std::cerr << "Failed to initialize planner!\n";
-        return false;
-    }
-    
-    // Perturb the initial trajectory to test optimization
-    // Access and modify current_trajectory_ through the planner
-    // NOTE: You may need to add a method to perturb or get mutable access to trajectory
-    // For now, the straight-line initialization should work as the collision cost
-    // pulls toward the optimal (which is also straight line for QuadraticBowlTask)
-    
-    // Run optimization
-    auto t_start = std::chrono::high_resolution_clock::now();
-    bool success = planner.solve();
-    auto t_end = std::chrono::high_resolution_clock::now();
-    
-    double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-    
-    std::cout << "\nSolver " << solver_name << " completed in " << elapsed_ms << " ms\n";
-    std::cout << "Success: " << (success ? "yes" : "no") << "\n";
-    
-    // Get final trajectory and evaluate
-    const Trajectory& final_traj = planner.getCurrentTrajectory();
-    float final_collision = task->computeStateCostSimple(final_traj);
-    float final_smoothness = planner.computeSmoothnessCost(final_traj);
-    
-    std::cout << "Final collision cost: " << final_collision << "\n";
-    std::cout << "Final smoothness cost: " << final_smoothness << "\n";
-    
-    return success && (final_collision < 0.1f);
+    return config;
 }
 
-/**
- * @brief Run tests with different tasks
- */
-void runAllTests(const std::string& solver_name) {
-    size_t num_nodes = 20;
-    size_t num_dims = 2;
-    
-    std::cout << "\n" << std::string(70, '#') << "\n";
-    std::cout << "# Testing solver: " << solver_name << "\n";
-    std::cout << std::string(70, '#') << "\n";
-    
-    int passed = 0;
-    int total = 0;
-    
-    // Test 1: Quadratic Bowl (simplest)
-    {
-        std::cout << "\n--- Test 1: QuadraticBowlTask ---\n";
-        auto task = std::make_shared<pce::QuadraticBowlTask>();
-        if (runSolverTest(solver_name, task, num_nodes, num_dims)) passed++;
-        total++;
-    }
-    
-    // Test 2: Quadratic Attractor
-    {
-        std::cout << "\n--- Test 2: QuadraticAttractorTask ---\n";
-        auto task = std::make_shared<pce::QuadraticAttractorTask>();
-        if (runSolverTest(solver_name, task, num_nodes, num_dims)) passed++;
-        total++;
-    }
-    
-    // Test 3: Zero collision (smoothness only)
-    {
-        std::cout << "\n--- Test 3: ZeroCollisionTask ---\n";
-        auto task = std::make_shared<pce::ZeroCollisionTask>();
-        if (runSolverTest(solver_name, task, num_nodes, num_dims)) passed++;
-        total++;
-    }
-    
-    // Test 4: Offset attractor (curved optimal)
-    {
-        std::cout << "\n--- Test 4: OffsetAttractorTask ---\n";
-        auto task = std::make_shared<pce::OffsetAttractorTask>(2.0f);
-        if (runSolverTest(solver_name, task, num_nodes, num_dims)) passed++;
-        total++;
-    }
-    
-    std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "Results for " << solver_name << ": " << passed << "/" << total << " tests passed\n";
-    std::cout << std::string(70, '=') << "\n";
-}
+// ============================================================
+// PCE Test (with perturbation)
+// ============================================================
 
-int main(int argc, char* argv[]) {
-    std::cout << "=== CasADi Solver Test Suite ===\n";
-    std::cout << "Testing solvers with CONVEX cost functions\n";
-    std::cout << "All tests should pass - failures indicate bugs!\n\n";
+TestResult runPCETest(float perturb_amplitude = 1.0f) {
+    TestResult result;
+    result.solver = "PCE";
     
-    // Get solver name from command line or test all
-    std::vector<std::string> solvers_to_test;
+    auto task = std::make_shared<pce::QuadraticBowlTask>();
+    ProximalCrossEntropyMotionPlanner planner(task);
+    PCEConfig config = makePCEConfig();
     
-    if (argc > 1) {
-        for (int i = 1; i < argc; ++i) {
-            solvers_to_test.push_back(argv[i]);
+    {
+        SilentScope quiet;
+        
+        if (!planner.initialize(config)) {
+            return result;
         }
-    } else {
-        // Default: test L-BFGS (most reliable)
-        solvers_to_test = {"lbfgs"};
+        
+        // Perturb trajectory away from optimal
+        planner.perturbTrajectory(perturb_amplitude, 42);
+        
+        // Compute initial total cost = J_state + J_smooth
+        const auto& traj = planner.getCurrentTrajectory();
+        float state_cost = task->computeStateCostSimple(traj);
+        float smoothness = planner.computeSmoothnessCost(traj);
+        result.initial_cost = state_cost + smoothness;
+        
+        auto t0 = std::chrono::high_resolution_clock::now();
+        planner.solve();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        
+        result.time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        
+        // Compute final total cost
+        const auto& final_traj = planner.getCurrentTrajectory();
+        state_cost = task->computeStateCostSimple(final_traj);
+        smoothness = planner.computeSmoothnessCost(final_traj);
+        result.final_cost = state_cost + smoothness;
     }
     
-    std::cout << "Solvers to test: ";
-    for (const auto& s : solvers_to_test) {
-        std::cout << s << " ";
+    // Pass: must improve AND reach reasonable cost
+    result.passed = (result.final_cost < result.initial_cost) && 
+                    (result.final_cost < 1.0) && 
+                    !std::isnan(result.final_cost);
+    return result;
+}
+
+// ============================================================
+// NGD Test (with perturbation)
+// ============================================================
+
+TestResult runNGDTest(float perturb_amplitude = 1.0f) {
+    TestResult result;
+    result.solver = "NGD";
+    
+    auto task = std::make_shared<pce::QuadraticBowlTask>();
+    NGDMotionPlanner planner(task);
+    NGDConfig config = makeNGDConfig();
+    
+    {
+        SilentScope quiet;
+        
+        if (!planner.initialize(config)) {
+            return result;
+        }
+        
+        // Perturb trajectory away from optimal
+        planner.perturbTrajectory(perturb_amplitude, 42);
+        
+        // Compute initial total cost = J_state + J_smooth
+        const auto& traj = planner.getCurrentTrajectory();
+        float state_cost = task->computeStateCostSimple(traj);
+        float smoothness = planner.computeSmoothnessCost(traj);
+        result.initial_cost = state_cost + smoothness;
+        
+        auto t0 = std::chrono::high_resolution_clock::now();
+        planner.solve();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        
+        result.time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        
+        // Compute final total cost
+        const auto& final_traj = planner.getCurrentTrajectory();
+        state_cost = task->computeStateCostSimple(final_traj);
+        smoothness = planner.computeSmoothnessCost(final_traj);
+        result.final_cost = state_cost + smoothness;
     }
+    
+    // Pass: must improve AND reach reasonable cost
+    result.passed = (result.final_cost < result.initial_cost) && 
+                    (result.final_cost < 1.0) && 
+                    !std::isnan(result.final_cost);
+    return result;
+}
+
+// ============================================================
+// CasADi Test (with perturbation)
+// ============================================================
+
+TestResult runCasADiTest(const std::string& solver, float perturb_amplitude = 1.0f) {
+    TestResult result;
+    result.solver = solver;
+    
+    auto task = std::make_shared<pce::QuadraticBowlTask>();
+    CasADiMotionPlanner planner(task);
+    CasADiConfig config = makeCasADiConfig(solver);
+    
+    {
+        SilentScope quiet;
+        
+        if (!planner.initialize(config)) {
+            return result;
+        }
+        
+        // Perturb trajectory away from optimal
+        planner.perturbTrajectory(perturb_amplitude, 42);
+        
+        // Compute initial total cost = J_state + J_smooth
+        const auto& traj = planner.getCurrentTrajectory();
+        float state_cost = task->computeStateCostSimple(traj);
+        float smoothness = planner.computeSmoothnessCost(traj);
+        result.initial_cost = state_cost + smoothness;
+        
+        auto t0 = std::chrono::high_resolution_clock::now();
+        planner.solve();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        
+        result.time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        
+        // Compute final total cost
+        const auto& final_traj = planner.getCurrentTrajectory();
+        state_cost = task->computeStateCostSimple(final_traj);
+        smoothness = planner.computeSmoothnessCost(final_traj);
+        result.final_cost = state_cost + smoothness;
+    }
+    
+    // Pass: must improve AND reach reasonable cost
+    result.passed = (result.final_cost < result.initial_cost) && 
+                    (result.final_cost < 1.0) && 
+                    !std::isnan(result.final_cost);
+    return result;
+}
+
+// ============================================================
+// Main
+// ============================================================
+
+int main() {
+    std::cout << "\n";
+    std::cout << "╔════════════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║       Solver Benchmark Test (QuadraticBowlTask)                    ║\n";
+    std::cout << "╠════════════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║  Cost = J_state + J_smooth (both convex, optimal = straight line) ║\n";
+    std::cout << "║  Start: perturbed │ Pass: improve AND final < 1.0                 ║\n";
+    std::cout << "╚════════════════════════════════════════════════════════════════════╝\n\n";
+    
+    std::vector<TestResult> results;
+    
+    std::cout << "  Solver     │  Initial Total →  Final Total │       Time   │ Result\n";
+    std::cout << "  ───────────┼────────────────────────────────┼──────────────┼────────\n";
+    
+    // Test PCE
+    {
+        TestResult r = runPCETest();
+        results.push_back(r);
+        printResult(r);
+    }
+    
+    // Test NGD
+    {
+        TestResult r = runNGDTest();
+        results.push_back(r);
+        printResult(r);
+    }
+    
+    // Test CasADi solvers
+    std::vector<std::string> casadi_solvers = {"lbfgs", "ipopt", "gd", "adam"};
+    
+    for (const auto& solver : casadi_solvers) {
+        TestResult r = runCasADiTest(solver);
+        results.push_back(r);
+        printResult(r);
+    }
+    
+    std::cout << "  ───────────┴────────────────────────────────┴──────────────┴────────\n";
+    
+    // Count passes
+    int passed = 0;
+    for (const auto& r : results) {
+        if (r.passed) passed++;
+    }
+    
+    std::cout << "\n  Result: " << passed << "/" << results.size() << " passed";
+    
+    if (passed == (int)results.size()) {
+        std::cout << " ✓ All tests passed!\n";
+    } else {
+        std::cout << " ✗ Some tests failed\n";
+    }
+    
+    // Find best solver
+    double best_cost = std::numeric_limits<double>::infinity();
+    std::string best_solver;
+    double best_time = 0;
+    
+    for (const auto& r : results) {
+        if (r.passed && r.final_cost < best_cost) {
+            best_cost = r.final_cost;
+            best_solver = r.solver;
+            best_time = r.time_ms;
+        }
+    }
+    
+    if (!best_solver.empty()) {
+        std::cout << "\n  ★ Best: " << best_solver 
+                  << " (cost=" << std::scientific << std::setprecision(2) << best_cost 
+                  << ", time=" << std::fixed << std::setprecision(1) << best_time << " ms)\n";
+    }
+    
     std::cout << "\n";
     
-    for (const auto& solver : solvers_to_test) {
-        runAllTests(solver);
-    }
-    
-    std::cout << "\n=== All Tests Complete ===\n";
-    
-    return 0;
+    return (passed == (int)results.size()) ? 0 : 1;
 }

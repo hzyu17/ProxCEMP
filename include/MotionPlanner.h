@@ -205,6 +205,8 @@ public:
             float t = static_cast<float>(i) / (num_nodes_ - 1);
             VectorXf pos = (1 - t) * start_node_.position + t * goal_node_.position;
             current_trajectory_.nodes.emplace_back(pos, start_node_.radius);
+            // Add a prior mean trajectory node the same as the initial trajectory
+            prior_mean_trajectory_.nodes.emplace_back(pos, start_node_.radius);
         }
         computeRMatrix(num_nodes_, total_time_);
     }
@@ -225,6 +227,41 @@ public:
             total_cost += Y_d.dot(R_matrix_ * Y_d);
         }
         return total_cost;
+    }
+
+    /**
+     * @brief Perturb the current trajectory for testing optimizers
+     * 
+     * Adds sinusoidal perturbation to interior waypoints.
+     * Call after initialize() but before solve() to test optimization
+     * from a non-optimal starting point.
+     * 
+     * @param amplitude Maximum perturbation magnitude
+     * @param seed Random seed for reproducibility (0 = use internal engine)
+     */
+    void perturbTrajectory(float amplitude = 3.0f, unsigned int seed = 0) {
+        if (current_trajectory_.nodes.empty()) {
+            std::cerr << "Warning: Cannot perturb empty trajectory\n";
+            return;
+        }
+        
+        std::mt19937 rng(seed == 0 ? random_seed_ : seed);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        
+        size_t N = current_trajectory_.nodes.size();
+        
+        for (size_t i = 1; i < N - 1; ++i) {
+            float t = static_cast<float>(i) / (N - 1);
+            float envelope = std::sin(M_PI * t);  // Zero at endpoints, max at middle
+            
+            for (size_t d = 0; d < num_dimensions_; ++d) {
+                float pert = amplitude * envelope * dist(rng);
+                current_trajectory_.nodes[i].position(d) += pert;
+            }
+        }
+        
+        // Store perturbed trajectory in history
+        trajectory_history_.push_back(current_trajectory_);
     }
 
     std::shared_ptr<ForwardKinematics> getForwardKinematics() const { return fk_; }
@@ -328,6 +365,12 @@ protected:
         return Y;
     }
 
+    Eigen::MatrixXf trajectoryToMatrix(const Trajectory& trajectory) const {
+        MatrixXf Y(num_dimensions_, trajectory.nodes.size());
+        for (size_t i = 0; i < trajectory.nodes.size(); ++i) Y.col(i) = trajectory.nodes[i].position;
+        return Y;
+    }
+
     void updateTrajectoryFromMatrix(const Eigen::MatrixXf& Y_new) {
         for (size_t i = 0; i < Y_new.cols(); ++i) current_trajectory_.nodes[i].position = Y_new.col(i);
         current_trajectory_.nodes.front().position = start_node_.position;
@@ -375,6 +418,7 @@ protected:
     std::shared_ptr<MotionPlannerConfig> config_;
     std::shared_ptr<ForwardKinematics> fk_;
     Trajectory current_trajectory_;
+    Trajectory prior_mean_trajectory_;
     std::vector<Trajectory> trajectory_history_;
     TrajectoryNode start_node_, goal_node_;
     size_t num_dimensions_, num_nodes_;

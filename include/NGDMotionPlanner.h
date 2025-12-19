@@ -275,8 +275,8 @@ public:
             std::cerr << "Error: No task set for optimization\n";
             return false;
         }
-        
-        log("Update Rule: Y_{k+1} = (1-η)Y_k - η E[S(Ỹ)ε], where Ỹ ~ N(Y_k, R^{-1})");
+
+        log("Update Rule: Y_{k+1} = (1-η)Y_k + η Y_k - η E[S(Ỹ)ε], where Ỹ ~ N(Y_k, R^{-1})");
         log("");
         
         const size_t N = current_trajectory_.nodes.size();
@@ -306,12 +306,15 @@ public:
         size_t best_iteration = 0;
         float current_temp = initial_temperature;
         float current_lr = initial_learning_rate;
+
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
             // FIX: Use initial values with proper decay
             // float current_lr = initial_learning_rate * std::pow(alpha, iteration - 1);
             // float current_temp = initial_temperature * std::pow(alpha_temp, iteration - 1);
             
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
+            Eigen::MatrixXf mu0_trj = trajectoryToMatrix(); // Use the current trajectory as prior mean
+            
             std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
             
             Eigen::MatrixXf natural_gradient = Eigen::MatrixXf::Zero(D, N);
@@ -342,7 +345,8 @@ public:
             natural_gradient /= static_cast<float>(M);
             
             // Update
-            Eigen::MatrixXf Y_new = (1.0f -  current_lr) * Y_k - current_lr * natural_gradient;
+            // Eigen::MatrixXf Y_new = (1.0f - current_lr) * Y_k + current_lr * mu0_trj - current_lr * natural_gradient;
+            Eigen::MatrixXf Y_new = Y_k - current_lr * natural_gradient;
             
             updateTrajectoryFromMatrix(Y_new);
             

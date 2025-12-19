@@ -43,11 +43,12 @@ include_directories(SYSTEM ${CASADI_INCLUDE_DIR})
 link_directories(${CASADI_LIBRARY_DIR})
 
 # --- Executables and Linking ---
-set(ALL_TARGETS main main_mute test_solvers visualize_collision_checking visualize_noisy_trj)
+set(ALL_TARGETS main main_mute test_solvers cart_pole visualize_collision_checking visualize_noisy_trj)
 
 foreach(exe ${ALL_TARGETS})
     add_executable(${exe} src/${exe}.cpp)
     target_include_directories(${exe} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+    target_include_directories(${exe} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../examples)
     
     # Base libraries
     target_link_libraries(${exe} PRIVATE SFML::System SFML::Window SFML::Graphics ${YAML_CPP_LIB} Eigen3::Eigen ${PLATFORM_LIBS} ${CASADI_LIBRARY})

@@ -6,7 +6,7 @@
 #include <filesystem>
 
 #include "../include/PCEMotionPlanner.h"
-#include "../include/CollisionAvoidanceTask.h"
+#include "../examples/CollisionAvoidanceTask.h"
 #include "../include/visualization.h"
 
 // --- Statistics Struct ---

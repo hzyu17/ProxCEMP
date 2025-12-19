@@ -78,7 +78,7 @@ inline std::string solverTypeToString(CasADiSolverType type) {
  */
 struct CasADiConfig : public MotionPlannerConfig {
     // Common optimization parameters
-    size_t max_iterations = 500;
+    size_t max_iterations = 200;
     float tolerance = 1e-6f;
     float collision_weight = 1.0f;
     float finite_diff_eps = 1e-4f;
@@ -593,44 +593,6 @@ protected:
         log("");
     }
 
-
-    /**
-     * @brief Perturb the current trajectory for testing
-     * 
-     * Call after initialize() but before solve() to test optimization
-     * from a non-optimal starting point.
-     * 
-     * @param amplitude Maximum perturbation amplitude
-     * @param seed Random seed for reproducibility (0 = use time-based)
-     */
-    void perturbTrajectory(float amplitude = 2.0f, unsigned int seed = 42) {
-        if (current_trajectory_.nodes.empty()) {
-            std::cerr << "Warning: Cannot perturb empty trajectory\n";
-            return;
-        }
-        
-        std::mt19937 rng(seed);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        
-        size_t N = current_trajectory_.nodes.size();
-        
-        for (size_t i = 1; i < N - 1; ++i) {
-            float t = static_cast<float>(i) / (N - 1);
-            float envelope = std::sin(M_PI * t);  // Zero at endpoints, max at middle
-            
-            for (size_t d = 0; d < num_dimensions_; ++d) {
-                float pert = amplitude * envelope * dist(rng);
-                current_trajectory_.nodes[i].position(d) += pert;
-            }
-        }
-        
-        // Update trajectory history
-        trajectory_history_.push_back(current_trajectory_);
-        
-        if (verbose_solver_) {
-            log("Trajectory perturbed with amplitude " + std::to_string(amplitude));
-        }
-    }
 
     /**
      * @brief Set a custom initial trajectory
