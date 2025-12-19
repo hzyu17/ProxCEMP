@@ -89,19 +89,6 @@ struct PCEConfig : public MotionPlannerConfig {
     }
 
 
-    std::string getScheduleName() const {
-        switch (cov_schedule) {
-            case CovarianceSchedule::CONSTANT:    return "constant";
-            case CovarianceSchedule::LINEAR:      return "linear";
-            case CovarianceSchedule::EXPONENTIAL: return "exponential";
-            case CovarianceSchedule::COSINE:      return "cosine";
-            case CovarianceSchedule::STEP:        return "step";
-            case CovarianceSchedule::ADAPTIVE:    return "adaptive";
-            default:                              return "unknown";
-        }
-    }
-
-
 };
 
 
@@ -247,39 +234,6 @@ public:
         return task_->computeStateCost(trajectory);
     }
 
-    /**
-     * @brief Sample noise matrices with covariance scaling
-     * 
-     * Samples ε ~ N(0, σ² * Σ) where:
-     * - Σ = R⁻¹ is the structured covariance from the smoothness prior
-     * - σ is the covariance scale factor
-     * 
-     * Implementation:
-     * 1. Sample z ~ N(0, I) 
-     * 2. Transform via Cholesky: ε_base ~ N(0, Σ) by solving L·ε = z
-     * 3. Scale: ε = σ · ε_base ~ N(0, σ²·Σ)
-     * 
-     * @param num_samples Number of samples to generate
-     * @param scale Covariance scale factor σ
-     * @return Vector of scaled noise matrices
-     */
-    std::vector<Eigen::MatrixXf> sampleScaledNoiseMatrices(size_t num_samples, float scale) {
-        const size_t N = current_trajectory_.nodes.size();
-        const size_t D = num_dimensions_;
-        
-        // Sample from structured prior (ε ~ N(0, Σ))
-        std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(num_samples, N, D);
-        
-        // Scale samples: σ·ε ~ N(0, σ²·Σ)
-        // This preserves the correlation structure while adjusting variance
-        if (std::abs(scale - 1.0f) > 1e-6f) {
-            for (size_t m = 0; m < num_samples; ++m) {
-                epsilon_samples[m] *= scale;
-            }
-        }
-        
-        return epsilon_samples;
-    }
 
     /**
      * @brief Runs the PCEM optimization loop
@@ -301,7 +255,6 @@ public:
         // Reset history
         trajectory_history_.clear();
         covariance_scale_history_.clear();
-        mean_cost_history_.clear(); // Added history reset
 
         gamma_ = pce_config_->gamma;
 
@@ -332,23 +285,46 @@ public:
 
             const size_t num_elites = std::max(static_cast<size_t>(1), static_cast<size_t>(M * elite_ratio_));
             
-            // 4. Weight Calculation (using scheduled temperature)
-            Eigen::VectorXf weights = Eigen::VectorXf::Zero(M);
-            float max_exponent = -std::numeric_limits<float>::infinity();
-            
+            // 4. Weight Calculation with Normalization
+            std::vector<float> raw_costs(num_elites);
+
+            // First pass: collect raw costs
             for (size_t i = 0; i < num_elites; ++i) {
                 size_t m = indices[i];
                 float reg_term = 0.0f;
                 for (size_t d = 0; d < D; ++d) {
                     reg_term += epsilon_samples[m].row(d).dot(R_matrix_ * Y_k.row(d).transpose());
                 }
-
-                float exponent = (-gamma_ * (sample_collisions[m] + reg_term)) / current_temp;
-                weights(m) = exponent;
-                if (exponent > max_exponent) max_exponent = exponent;
+                raw_costs[i] = sample_collisions[m] + reg_term;
             }
 
-            // 5. Normalized Softmax
+            // Compute mean and std of elite costs
+            float mean_cost = 0.0f;
+            for (size_t i = 0; i < num_elites; ++i) {
+                mean_cost += raw_costs[i];
+            }
+            mean_cost /= num_elites;
+
+            float std_cost = 0.0f;
+            for (size_t i = 0; i < num_elites; ++i) {
+                float diff = raw_costs[i] - mean_cost;
+                std_cost += diff * diff;
+            }
+            std_cost = std::sqrt(std_cost / num_elites + 1e-8f);
+
+            // Second pass: compute normalized exponents
+            Eigen::VectorXf weights = Eigen::VectorXf::Zero(M);
+            float max_exponent = -std::numeric_limits<float>::infinity();
+
+            for (size_t i = 0; i < num_elites; ++i) {
+                size_t m = indices[i];
+                float normalized_cost = (raw_costs[i] - mean_cost) / std_cost;
+                float exponent = -gamma_ * normalized_cost / current_temp;
+                weights(m) = exponent;
+                max_exponent = std::max(max_exponent, exponent);
+            }
+
+            // 5. Softmax with log-sum-exp stability
             float weight_sum = 0.0f;
             for (size_t i = 0; i < num_elites; ++i) {
                 size_t m = indices[i];
@@ -379,7 +355,7 @@ public:
 
             trajectory_history_.push_back(current_trajectory_);
             covariance_scale_history_.push_back(cov_scale_current_);
-            mean_cost_history_.push_back(current_total_cost); // Record history
+            cov_scale_current_ = computeCovarianceScale(iteration + 1, prev_cost, current_total_cost);
 
             if (current_total_cost < best_cost) {
                 best_cost = current_total_cost;
@@ -388,11 +364,10 @@ public:
 
             // --- Every 10 steps ---
             if (iteration == 1 || iteration % 10 == 0 || iteration == num_iterations_) {
-                logf("Iter %zu: Cost=%.3f, Temp=%.4f, σ=%.4f", 
-                    iteration, current_total_cost, current_temp, cov_scale_current_);
+                logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f) Temp: %.4f",
+                    iteration, current_total_cost, current_collision, current_smoothness, current_temp);
             }
 
-            cov_scale_current_ = computeCovarianceScale(iteration + 1, prev_cost, current_total_cost);
             if (std::abs(prev_cost - current_total_cost) < convergence_threshold_) break;
             prev_cost = current_total_cost;
             
@@ -491,9 +466,7 @@ private:
     float cov_adaptive_threshold_ = 0.05f;
     float cov_scale_current_ = 1.0f;
     
-    // History tracking
     std::vector<float> covariance_scale_history_;
-    std::vector<float> mean_cost_history_;
     
     std::mt19937 random_engine_;
 };

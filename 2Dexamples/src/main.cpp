@@ -346,7 +346,7 @@ int main() {
     //               << casadi_final_res.second << "\n";
     // }
 
-    // std::cout << std::string(70, '-') << "\n";
+    std::cout << std::string(70, '-') << "\n";
 
     // Find best result
     std::string best_planner = "PCE";

@@ -113,6 +113,19 @@ struct MotionPlannerConfig {
                   << "  Dimensions: " << num_dimensions << " | Nodes: " << num_discretization << "\n"
                   << "  Time: " << total_time << " | Seed: " << random_seed << "\n";
     }
+
+    std::string getScheduleName() const {
+        switch (cov_schedule) {
+            case CovarianceSchedule::CONSTANT:    return "constant";
+            case CovarianceSchedule::LINEAR:      return "linear";
+            case CovarianceSchedule::EXPONENTIAL: return "exponential";
+            case CovarianceSchedule::COSINE:      return "cosine";
+            case CovarianceSchedule::STEP:        return "step";
+            case CovarianceSchedule::ADAPTIVE:    return "adaptive";
+            default:                              return "unknown";
+        }
+    }
+
     virtual ~MotionPlannerConfig() = default;
 };
 
@@ -282,6 +295,41 @@ public:
         return samples;
     }
 
+
+    /**
+     * @brief Sample noise matrices with covariance scaling
+     * 
+     * Samples ε ~ N(0, σ² * Σ) where:
+     * - Σ = R⁻¹ is the structured covariance from the smoothness prior
+     * - σ is the covariance scale factor
+     * 
+     * Implementation:
+     * 1. Sample z ~ N(0, I) 
+     * 2. Transform via Cholesky: ε_base ~ N(0, Σ) by solving L·ε = z
+     * 3. Scale: ε = σ · ε_base ~ N(0, σ²·Σ)
+     * 
+     * @param num_samples Number of samples to generate
+     * @param scale Covariance scale factor σ
+     * @return Vector of scaled noise matrices
+     */
+    std::vector<Eigen::MatrixXf> sampleScaledNoiseMatrices(size_t num_samples, float scale) {
+        const size_t N = current_trajectory_.nodes.size();
+        const size_t D = num_dimensions_;
+        
+        // Sample from structured prior (ε ~ N(0, Σ))
+        std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(num_samples, N, D);
+        
+        // Scale samples: σ·ε ~ N(0, σ²·Σ)
+        // This preserves the correlation structure while adjusting variance
+        if (std::abs(scale - 1.0f) > 1e-6f) {
+            for (size_t m = 0; m < num_samples; ++m) {
+                epsilon_samples[m] *= scale;
+            }
+        }
+        
+        return epsilon_samples;
+    }
+
 protected:
     CovarianceSchedule cov_schedule_;
     float cov_scale_initial_, cov_scale_final_, cov_decay_rate_, cov_step_factor_, cov_adaptive_threshold_, cov_scale_current_;
@@ -334,28 +382,39 @@ protected:
 
     virtual void initializeTask() = 0;
 
-    void computeRMatrix(size_t n, float time) {
-        float dt = time / (n - 1);
-        float scale = 1.0f / std::pow(dt, 4);
+
+   void computeRMatrix(size_t n, float time) {
         R_matrix_ = SparseMatrixXf(n, n);
-        if (n < 3) { R_matrix_.setIdentity(); return; }
-
-        std::vector<Eigen::Triplet<float>> triplets;
-        auto add = [&](int i, int j, float v) { 
-            triplets.emplace_back(i, j, v * scale); 
-            if(i != j) triplets.emplace_back(j, i, v * scale);
-        };
-
-        for (size_t i = 0; i < n; ++i) {
-            float diag = (i == 0 || i == n - 1) ? 1.0f : (i == 1 || i == n - 2) ? 5.0f : 6.0f;
-            add(i, i, diag);
-            if (i < n - 1) add(i, i + 1, (i == 0 || i == n - 2) ? -2.0f : -4.0f);
-            if (i < n - 2) add(i, i + 2, 1.0f);
+        if (n < 3) { 
+            R_matrix_.setIdentity(); 
+            return; 
         }
+        
+        // Work in normalized time s ∈ [0,1], ds = 1/(n-1)
+        // Scale = 1/ds³ = (n-1)³
+        // This makes cost independent of both T and n
+        float scale = std::pow(static_cast<float>(n - 1), 3);
+        
+        std::vector<Eigen::Triplet<float>> triplets;
+        triplets.reserve(5 * n);
+        
+        for (size_t i = 0; i < n; ++i) {
+            triplets.emplace_back(i, i, 6.0f * scale);
+            if (i + 1 < n) {
+                triplets.emplace_back(i, i + 1, -4.0f * scale);
+                triplets.emplace_back(i + 1, i, -4.0f * scale);
+            }
+            if (i + 2 < n) {
+                triplets.emplace_back(i, i + 2, 1.0f * scale);
+                triplets.emplace_back(i + 2, i, 1.0f * scale);
+            }
+        }
+        
         R_matrix_.setFromTriplets(triplets.begin(), triplets.end());
         precomputeCholeskyFactorization(n, time);
         storeTrajectory();
     }
+
 
     void storeTrajectory() { trajectory_history_.push_back(current_trajectory_); }
 

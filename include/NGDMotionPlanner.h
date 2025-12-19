@@ -29,6 +29,7 @@ struct NGDConfig : public MotionPlannerConfig {
     size_t num_iterations = 10;
     float learning_rate = 0.01f;
     float temperature = 1.0f;  // Temperature for gradient scaling
+    float temperature_final = 0.1f; // Added: T_final for scheduling
     float convergence_threshold = 0.01f;
     
     // Cost function parameters
@@ -159,6 +160,18 @@ struct NGDConfig : public MotionPlannerConfig {
         printf("Sigma obs:              %.4f\n", sigma_obs);
         printf("\n");
     }
+
+    std::string getScheduleName() const {
+        switch (cov_schedule) {
+            case CovarianceSchedule::CONSTANT:    return "constant";
+            case CovarianceSchedule::LINEAR:      return "linear";
+            case CovarianceSchedule::EXPONENTIAL: return "exponential";
+            case CovarianceSchedule::COSINE:      return "cosine";
+            case CovarianceSchedule::STEP:        return "step";
+            case CovarianceSchedule::ADAPTIVE:    return "adaptive";
+            default:                              return "unknown";
+        }
+    }
 };
 
 /**
@@ -191,16 +204,12 @@ public:
     /**
      * @brief Set the task for this planner
      */
-    void setTask(pce::TaskPtr task) {
-        task_ = task;
-    }
+    void setTask(pce::TaskPtr task) { task_ = task; }
 
     /**
      * @brief Get the current task
      */
-    pce::TaskPtr getTask() const {
-        return task_;
-    }
+    pce::TaskPtr getTask() const { return task_; }
 
     /**
      * @brief Initialize planner with NGD configuration
@@ -225,6 +234,18 @@ public:
         convergence_threshold_ = config.convergence_threshold;
         epsilon_sdf_ = config.epsilon_sdf;
         sigma_obs_ = config.sigma_obs;
+
+        // Extract covariance scheduling parameters
+        cov_schedule_ = config.cov_schedule;
+        cov_scale_initial_ = config.cov_scale_initial;
+        cov_scale_final_ = config.cov_scale_final;
+        cov_decay_rate_ = config.cov_decay_rate;
+        cov_step_interval_ = config.cov_step_interval;
+        cov_step_factor_ = config.cov_step_factor;
+        cov_adaptive_threshold_ = config.cov_adaptive_threshold;
+        
+        // Initialize current covariance scale
+        cov_scale_current_ = cov_scale_initial_;
         
         // Call base class initialize with base config portion
         bool result = false;
@@ -258,13 +279,13 @@ public:
         return "NGD";
     }
 
-    // const std::vector<ObstacleND>& getObstacles() const override {
-    //     return obstacles_;
-    // }
-
     const Eigen::SparseMatrix<float>& getRMatrix() const {
         return R_matrix_;
     }
+
+    // Covariance scheduling getters
+    float getCovarianceScale() const { return cov_scale_current_; }
+    CovarianceSchedule getCovarianceSchedule() const { return cov_schedule_; }
 
 
     /**
@@ -288,127 +309,89 @@ public:
         const float initial_temperature = temperature_;
         const float alpha = 0.99f;
         const float alpha_temp = 1.01f;
-        
-        // Clear and store initial trajectory
-        trajectory_history_.clear();
-        trajectory_history_.push_back(current_trajectory_);
-        
-        // Iteration 0: Log initial cost (CONSISTENT WITH PCE)
-        float collision_cost = task_->computeStateCostSimple(current_trajectory_);
-        float smoothness_cost = computeSmoothnessCost(current_trajectory_);
-        float cost = collision_cost + smoothness_cost;
-        
-        logf("Iteration 0 (Initial) - Cost: %.2f (Collision: %.4f, Smoothness: %.4f)",
-            cost, collision_cost, smoothness_cost);
-        
-        float best_cost = cost;
-        Trajectory best_trajectory = current_trajectory_;
-        size_t best_iteration = 0;
-        float current_temp = initial_temperature;
+
+        /**
+         * @brief Modifications =======================================
+         * 
+         */
         float current_lr = initial_learning_rate;
+        float best_cost = std::numeric_limits<float>::infinity();
+        size_t best_iteration = 0;
+        float prev_cost = std::numeric_limits<float>::infinity();
+
+        // Reset history
+        trajectory_history_.clear();
+        covariance_scale_history_.clear();
+        // ============================================================
 
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
-            // FIX: Use initial values with proper decay
-            // float current_lr = initial_learning_rate * std::pow(alpha, iteration - 1);
-            // float current_temp = initial_temperature * std::pow(alpha_temp, iteration - 1);
-            
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
-            Eigen::MatrixXf mu0_trj = trajectoryToMatrix(); // Use the current trajectory as prior mean
-            
-            std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
-            
+
+            // --- Temperature Schedule Calculation ---
+            float progress = static_cast<float>(iteration - 1) / std::max(1.0f, static_cast<float>(num_iterations_ - 1));
+            float current_temp = ngd_config_->temperature * std::pow((ngd_config_->temperature_final / ngd_config_->temperature), progress);
             Eigen::MatrixXf natural_gradient = Eigen::MatrixXf::Zero(D, N);
-            
-            // Create perturbed trajectories
+
+            // 2. Sampling and Evaluation
+            // std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
+            std::vector<Eigen::MatrixXf> epsilon_samples = sampleScaledNoiseMatrices(M, cov_scale_current_);
             std::vector<Trajectory> sample_trajectories;
             sample_trajectories.reserve(M);
             
             for (size_t m = 0; m < M; ++m) {
-                Trajectory sample_traj = createPerturbedTrajectory(Y_k, epsilon_samples[m]);
-                sample_trajectories.push_back(sample_traj);
+                sample_trajectories.push_back(createPerturbedTrajectory(Y_k, epsilon_samples[m]));
             }
             
             // Batch evaluate
             std::vector<float> sample_collisions = task_->computeStateCostSimple(sample_trajectories);
-            
-            // Fix invalid costs
-            for (size_t m = 0; m < sample_collisions.size(); ++m) {
-                if (!std::isfinite(sample_collisions[m])) {
-                    sample_collisions[m] = 1e6f;
-                }
-            }
-            
+                        
+            // 3. Update current trajectory
+
             // Compute natural gradient with temperature scaling
             for (size_t m = 0; m < M; ++m) {
                 natural_gradient += (sample_collisions[m] / current_temp) * epsilon_samples[m];
             }
             natural_gradient /= static_cast<float>(M);
             
-            // Update
-            // Eigen::MatrixXf Y_new = (1.0f - current_lr) * Y_k + current_lr * mu0_trj - current_lr * natural_gradient;
             Eigen::MatrixXf Y_new = Y_k - current_lr * natural_gradient;
             
             updateTrajectoryFromMatrix(Y_new);
             
-            // Fix endpoints
+            // 4. Cleanup & Constraints
             current_trajectory_.nodes[0].position = start_node_.position;
             current_trajectory_.nodes[N - 1].position = goal_node_.position;
-            
-            // Store trajectory
+            task_->filterTrajectory(current_trajectory_, iteration);
+
+            // 5. Logging and Convergence
+            float current_collision = task_->computeStateCostSimple(current_trajectory_);
+            float current_smoothness = computeSmoothnessCost(current_trajectory_);
+            float current_total_cost = current_collision + current_smoothness;
+
             trajectory_history_.push_back(current_trajectory_);
+            covariance_scale_history_.push_back(cov_scale_current_);
+            cov_scale_current_ = computeCovarianceScale(iteration + 1, prev_cost, current_total_cost);
             
-            // Compute new cost
-            collision_cost = task_->computeStateCostSimple(current_trajectory_);
-            smoothness_cost = computeSmoothnessCost(current_trajectory_);
-            float new_cost = collision_cost + smoothness_cost;
-            
+            if (current_total_cost < best_cost) {
+                best_cost = current_total_cost;
+                best_iteration = iteration;
+            }
+
             // --- Every 10 steps ---
             if (iteration == 1 || iteration % 10 == 0 || iteration == num_iterations_) {
                 logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f) LR: %.6f, Temp: %.4f",
-                    iteration, new_cost, collision_cost, smoothness_cost, current_lr, current_temp);
-            }
-
-            if (new_cost < best_cost) {
-                logf("  New best! (previous: %.2f at iteration %zu)", best_cost, best_iteration);
-                best_cost = new_cost;
-                best_trajectory = current_trajectory_;
-                best_iteration = iteration;
+                    iteration, current_total_cost, current_collision, current_smoothness, current_lr, current_temp);
             }
             
-            // Check divergence
-            if (std::isnan(new_cost) || std::isinf(new_cost) || new_cost > 1e10) {
-                log("WARNING: Optimization diverged! Restoring best trajectory.");
-                current_trajectory_ = best_trajectory;
-                break;
-            }
+            if (std::abs(prev_cost - current_total_cost) < convergence_threshold_) break;
+            prev_cost = current_total_cost;
             
-            // Check convergence
-            if (iteration > 1 && std::abs(cost - new_cost) < convergence_threshold_) {
-                log("Converged!");
-                break;
-            }
-            
-            task_->postIteration(iteration, new_cost, current_trajectory_);
-            cost = new_cost;
+            task_->postIteration(iteration, current_total_cost, current_trajectory_);
         }
         
-        // Restore best
-        current_trajectory_ = best_trajectory;
-        
-        collision_cost = task_->computeStateCostSimple(current_trajectory_);
-        smoothness_cost = computeSmoothnessCost(current_trajectory_);
-        
-        logf("\n*** Restoring best trajectory from iteration %zu with cost %.2f ***",
-            best_iteration, best_cost);
-        logf("NGD finished. Final Cost: %.2f (Collision: %.4f, Smoothness: %.4f)", 
-            best_cost, collision_cost, smoothness_cost);
-        
-        bool success = (best_cost < std::numeric_limits<float>::infinity());
-        task_->done(success, num_iterations_, best_cost, current_trajectory_);
-        
-        log("\nLog saved to: " + getLogFilename());
-        
-        return success;
+        current_trajectory_ = trajectory_history_[best_iteration];
+        task_->done(true, num_iterations_, best_cost, current_trajectory_);
+        return true;
+
     }
 
 
@@ -472,4 +455,17 @@ private:
     // Cost function parameters
     float epsilon_sdf_ = 2.0f;
     float sigma_obs_ = 0.5f;
+
+    // Covariance scheduling parameters
+    CovarianceSchedule cov_schedule_ = CovarianceSchedule::EXPONENTIAL;
+    float cov_scale_initial_ = 1.0f;
+    float cov_scale_final_ = 0.1f;
+    float cov_decay_rate_ = 0.9f;
+    size_t cov_step_interval_ = 3;
+    float cov_step_factor_ = 0.5f;
+    float cov_adaptive_threshold_ = 0.05f;
+    float cov_scale_current_ = 1.0f;
+    
+    std::vector<float> covariance_scale_history_;
+
 };
