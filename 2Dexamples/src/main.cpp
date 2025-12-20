@@ -1,6 +1,7 @@
 #include "PCEMotionPlanner.h"
 #include "NGDMotionPlanner.h"
 #include "CasadiMotionPlanner.h"
+#include "STOMPMotionPlanner.h"  // NEW: STOMP planner
 #include "CollisionAvoidanceTask.h"
 #include "ObstacleMap.h"
 #include "visualization.h"
@@ -158,103 +159,182 @@ int main() {
         std::cout << "\n✗ NGD optimization failed\n";
     }
 
-    // // =========================================================================
-    // // CASADI PLANNERS - ALL SOLVERS
-    // // =========================================================================
-    
-    // // Define all solvers to test (sqp excluded - needs qpoases library)
-    // // std::vector<std::string> casadi_solvers = {"lbfgs", "ipopt", "gd", "adam"};
-    // std::vector<std::string> casadi_solvers = {"lbfgs"};
+    // =========================================================================
+    // STOMP PLANNER (NEW)
+    // =========================================================================
+    std::cout << "\n=== STOMP Planner ===\n";
 
-    // // Store results for each solver
-    // std::map<std::string, OptimizationHistory> casadi_histories;
-    // std::map<std::string, bool> casadi_success;
-    // std::map<std::string, std::shared_ptr<CasADiMotionPlanner>> casadi_planners;
-    // std::map<std::string, std::shared_ptr<pce::CollisionAvoidanceTask>> casadi_tasks;
-    
-    // for (const auto& solver_name : casadi_solvers) {
-    //     std::cout << "\n=== CasADi Planner (" << solver_name << ") ===\n";
+    auto task_stomp = std::make_shared<pce::CollisionAvoidanceTask>(config);
+    auto planner_stomp = std::make_shared<pce::StompMotionPlanner>(task_stomp);
 
-    //     // Create fresh task for each solver
-    //     auto task_casadi = std::make_shared<pce::CollisionAvoidanceTask>(config);
-    //     casadi_tasks[solver_name] = task_casadi;
-
-    //     // Create planner
-    //     auto planner_casadi = std::make_shared<CasADiMotionPlanner>(task_casadi);
-    //     casadi_planners[solver_name] = planner_casadi;
-
-    //     // Load configuration
-    //     CasADiConfig casadi_config;
-    //     if (!casadi_config.loadFromFile(config_file)) {
-    //         std::cerr << "Failed to load CasADi configuration from file\n";
-    //         casadi_success[solver_name] = false;
-    //         continue;
-    //     }
+    pce::StompPlannerConfig stomp_config;
+    if (!stomp_config.loadFromFile(config_file)) {
+        std::cerr << "Failed to load STOMP configuration from file\n";
+        std::cerr << "Using default STOMP parameters...\n";
         
-    //     // Override solver type
-    //     casadi_config.solver = solver_name;
-    //     casadi_config.solver_type = stringToSolverType(solver_name);
+        // Set defaults from motion_planning section if stomp section is missing
+        if (const auto& mp = config["motion_planning"]) {
+            stomp_config.num_timesteps = mp["num_nodes"].as<size_t>(50);
+            stomp_config.num_dimensions = mp["num_dimensions"].as<size_t>(2);
+            if (mp["start_position"]) {
+                stomp_config.start_position = mp["start_position"].as<std::vector<float>>();
+            }
+            if (mp["goal_position"]) {
+                stomp_config.goal_position = mp["goal_position"].as<std::vector<float>>();
+            }
+        }
+    }
 
-    //     std::cout << "Initializing CasADi-" << solver_name << "...\n";
-    //     if (!planner_casadi->initialize(casadi_config)) {
-    //         std::cerr << "Error: CasADi-" << solver_name << " initialization failed\n";
-    //         casadi_success[solver_name] = false;
-    //         continue;
-    //     }
+    std::cout << "\n=== Initializing STOMP Planner ===\n";
+    if (!planner_stomp->initialize(stomp_config)) {
+        std::cerr << "Error: STOMP Planner initialization failed\n";
+        return 1;
+    }
 
-    //     if (visualize) {
-    //         std::cout << "Showing CasADi-" << solver_name << " initial state...\n";
-    //         visualizeInitialState(task_casadi->getObstacles(),
-    //                             planner_casadi->getCurrentTrajectory(),
-    //                             "CasADi-" + solver_name + " - Initial State");
-    //     }
+    if (visualize) {
+        std::cout << "Showing STOMP initial state visualization...\n";
+        visualizeInitialState(task_stomp->getObstacles(),
+                            planner_stomp->getCurrentTrajectory(),
+                            "STOMP - Initial State");
+    }
 
-    //     // Optimization with data collection
-    //     std::cout << "Running CasADi-" << solver_name << " optimization...\n";
+    // Collect STOMP history
+    OptimizationHistory stomp_history;
+    stomp_history.clear();
 
-    //     OptimizationHistory history;
-    //     history.clear();
+    // Store initial state
+    {
+        IterationData init_data;
+        init_data.iteration = 0;
+        init_data.mean_trajectory = planner_stomp->getCurrentTrajectory();
+        init_data.total_cost = task_stomp->computeStateCost(init_data.mean_trajectory);
+        init_data.collision_cost = init_data.total_cost;
+        init_data.smoothness_cost = 0.0f;
+        stomp_history.addIteration(init_data);
+    }
 
-    //     // Store initial state
-    //     {
-    //         IterationData init_data;
-    //         init_data.iteration = 0;
-    //         init_data.mean_trajectory = planner_casadi->getCurrentTrajectory();
-    //         init_data.total_cost = task_casadi->computeStateCost(init_data.mean_trajectory);
-    //         init_data.collision_cost = init_data.total_cost;
-    //         init_data.smoothness_cost = 0.0f;
-    //         history.addIteration(init_data);
-    //     }
+    std::cout << "\n=== Running STOMP Optimization ===\n";
+    bool success_stomp = planner_stomp->solve();
 
-    //     // Run optimization
-    //     bool success = planner_casadi->solve();
-    //     casadi_success[solver_name] = success;
+    auto traj_history_stomp = planner_stomp->getTrajectoryHistory();
+    for (size_t i = 0; i < traj_history_stomp.size(); ++i) {
+        IterationData iter_data;
+        iter_data.iteration = i;
+        iter_data.mean_trajectory = traj_history_stomp[i];
+        iter_data.total_cost = task_stomp->computeStateCost(traj_history_stomp[i]);
+        iter_data.collision_cost = iter_data.total_cost;
+        iter_data.smoothness_cost = 0.0f;
+        stomp_history.addIteration(iter_data);
+    }
 
-    //     // Convert trajectory history
-    //     auto traj_history = planner_casadi->getTrajectoryHistory();
-    //     for (size_t i = 0; i < traj_history.size(); ++i) {
-    //         IterationData iter_data;
-    //         iter_data.iteration = i;
-    //         iter_data.mean_trajectory = traj_history[i];
-    //         iter_data.total_cost = task_casadi->computeStateCost(traj_history[i]);
-    //         iter_data.collision_cost = iter_data.total_cost;
-    //         iter_data.smoothness_cost = 0.0f;
-    //         history.addIteration(iter_data);
-    //     }
+    stomp_history.final_trajectory = planner_stomp->getCurrentTrajectory();
+    stomp_history.final_cost = task_stomp->computeStateCost(stomp_history.final_trajectory);
+    stomp_history.converged = success_stomp;
+    stomp_history.total_iterations = traj_history_stomp.size();
 
-    //     history.final_trajectory = planner_casadi->getCurrentTrajectory();
-    //     history.final_cost = task_casadi->computeStateCost(history.final_trajectory);
-    //     history.converged = success;
-    //     history.total_iterations = traj_history.size();
+    if (success_stomp) {
+        std::cout << "\n✓ STOMP optimization completed successfully\n";
+    } else {
+        std::cout << "\n✗ STOMP optimization failed\n";
+    }
 
-    //     casadi_histories[solver_name] = history;
+    // =========================================================================
+    // CASADI PLANNERS - ALL SOLVERS
+    // =========================================================================
+    
+    // Define all solvers to test (sqp excluded - needs qpoases library)
+    // std::vector<std::string> casadi_solvers = {"lbfgs", "ipopt", "gd", "adam"};
+    std::vector<std::string> casadi_solvers = {"ipopt"};
 
-    //     if (success) {
-    //         std::cout << "✓ CasADi-" << solver_name << " completed successfully\n";
-    //     } else {
-    //         std::cout << "✗ CasADi-" << solver_name << " failed\n";
-    //     }
-    // }
+    // Store results for each solver
+    std::map<std::string, OptimizationHistory> casadi_histories;
+    std::map<std::string, bool> casadi_success;
+    std::map<std::string, std::shared_ptr<CasADiMotionPlanner>> casadi_planners;
+    std::map<std::string, std::shared_ptr<pce::CollisionAvoidanceTask>> casadi_tasks;
+    
+    for (const auto& solver_name : casadi_solvers) {
+        std::cout << "\n=== CasADi Planner (" << solver_name << ") ===\n";
+
+        // Create fresh task for each solver
+        auto task_casadi = std::make_shared<pce::CollisionAvoidanceTask>(config);
+        casadi_tasks[solver_name] = task_casadi;
+
+        // Create planner
+        auto planner_casadi = std::make_shared<CasADiMotionPlanner>(task_casadi);
+        casadi_planners[solver_name] = planner_casadi;
+
+        // Load configuration
+        CasADiConfig casadi_config;
+        if (!casadi_config.loadFromFile(config_file)) {
+            std::cerr << "Failed to load CasADi configuration from file\n";
+            casadi_success[solver_name] = false;
+            continue;
+        }
+        
+        // Override solver type
+        casadi_config.solver = solver_name;
+        casadi_config.solver_type = stringToSolverType(solver_name);
+
+        std::cout << "Initializing CasADi-" << solver_name << "...\n";
+        if (!planner_casadi->initialize(casadi_config)) {
+            std::cerr << "Error: CasADi-" << solver_name << " initialization failed\n";
+            casadi_success[solver_name] = false;
+            continue;
+        }
+
+        if (visualize) {
+            std::cout << "Showing CasADi-" << solver_name << " initial state...\n";
+            visualizeInitialState(task_casadi->getObstacles(),
+                                planner_casadi->getCurrentTrajectory(),
+                                "CasADi-" + solver_name + " - Initial State");
+        }
+
+        // Optimization with data collection
+        std::cout << "Running CasADi-" << solver_name << " optimization...\n";
+
+        OptimizationHistory history;
+        history.clear();
+
+        // Store initial state
+        {
+            IterationData init_data;
+            init_data.iteration = 0;
+            init_data.mean_trajectory = planner_casadi->getCurrentTrajectory();
+            init_data.total_cost = task_casadi->computeStateCost(init_data.mean_trajectory);
+            init_data.collision_cost = init_data.total_cost;
+            init_data.smoothness_cost = 0.0f;
+            history.addIteration(init_data);
+        }
+
+        // Run optimization
+        bool success = planner_casadi->solve();
+        casadi_success[solver_name] = success;
+
+        // Convert trajectory history
+        auto traj_history = planner_casadi->getTrajectoryHistory();
+        for (size_t i = 0; i < traj_history.size(); ++i) {
+            IterationData iter_data;
+            iter_data.iteration = i;
+            iter_data.mean_trajectory = traj_history[i];
+            iter_data.total_cost = task_casadi->computeStateCost(traj_history[i]);
+            iter_data.collision_cost = iter_data.total_cost;
+            iter_data.smoothness_cost = 0.0f;
+            history.addIteration(iter_data);
+        }
+
+        history.final_trajectory = planner_casadi->getCurrentTrajectory();
+        history.final_cost = task_casadi->computeStateCost(history.final_trajectory);
+        history.converged = success;
+        history.total_iterations = traj_history.size();
+
+        casadi_histories[solver_name] = history;
+
+        if (success) {
+            std::cout << "✓ CasADi-" << solver_name << " completed successfully\n";
+        } else {
+            std::cout << "✗ CasADi-" << solver_name << " failed\n";
+        }
+    }
 
     // =========================================================================
     // VISUALIZATION WITH COST PLOTS
@@ -280,19 +360,27 @@ int main() {
     std::cout << "\nDisplaying NGD cost convergence...\n";
     visualizer.showCostPlot(ngd_history, "NGD - Cost Convergence");
 
-    // // Show all CasADi solver results
-    // for (const auto& solver_name : casadi_solvers) {
-    //     if (casadi_histories.find(solver_name) == casadi_histories.end()) continue;
-        
-    //     const auto& history = casadi_histories[solver_name];
-        
-    //     std::cout << "\nDisplaying CasADi-" << solver_name << " trajectory evolution...\n";
-    //     visualizer.showTrajectoryEvolution(*obstacle_map_ptr, history, 
-    //                                        "CasADi-" + solver_name + " - Trajectory Evolution");
+    // Show STOMP trajectory evolution (NEW)
+    std::cout << "\nDisplaying STOMP trajectory evolution...\n";
+    visualizer.showTrajectoryEvolution(*obstacle_map_ptr, stomp_history, "STOMP - Trajectory Evolution");
 
-    //     std::cout << "Displaying CasADi-" << solver_name << " cost convergence...\n";
-    //     visualizer.showCostPlot(history, "CasADi-" + solver_name + " - Cost Convergence");
-    // }
+    // Show STOMP cost convergence (NEW)
+    std::cout << "\nDisplaying STOMP cost convergence...\n";
+    visualizer.showCostPlot(stomp_history, "STOMP - Cost Convergence");
+
+    // Show all CasADi solver results
+    for (const auto& solver_name : casadi_solvers) {
+        if (casadi_histories.find(solver_name) == casadi_histories.end()) continue;
+        
+        const auto& history = casadi_histories[solver_name];
+        
+        std::cout << "\nDisplaying CasADi-" << solver_name << " trajectory evolution...\n";
+        visualizer.showTrajectoryEvolution(*obstacle_map_ptr, history, 
+                                           "CasADi-" + solver_name + " - Trajectory Evolution");
+
+        std::cout << "Displaying CasADi-" << solver_name << " cost convergence...\n";
+        visualizer.showCostPlot(history, "CasADi-" + solver_name + " - Cost Convergence");
+    }
 
     // =========================================================================
     // SUMMARY
@@ -310,6 +398,7 @@ int main() {
 
     auto pce_final_res = evaluate_final(planner_pce->getCurrentTrajectory());
     auto ngd_final_res = evaluate_final(planner_ngd->getCurrentTrajectory());
+    auto stomp_final_res = evaluate_final(planner_stomp->getCurrentTrajectory());  // NEW
 
     std::cout << std::left << std::setw(18) << "Planner" 
               << std::setw(12) << "Status" 
@@ -330,21 +419,28 @@ int main() {
               << std::setw(15) << ngd_final_res.first
               << ngd_final_res.second << "\n";
 
-    // // Print all CasADi solver results
-    // for (const auto& solver_name : casadi_solvers) {
-    //     if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
+    // NEW: STOMP results
+    std::cout << std::left << std::setw(18) << "STOMP" 
+              << std::setw(12) << (success_stomp ? "SUCCESS" : "FAILED")
+              << std::setw(10) << stomp_history.total_iterations
+              << std::setw(15) << stomp_final_res.first
+              << stomp_final_res.second << "\n";
+
+    // Print all CasADi solver results
+    for (const auto& solver_name : casadi_solvers) {
+        if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
         
-    //     auto casadi_final_res = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
-    //     const auto& history = casadi_histories[solver_name];
-    //     bool success = casadi_success[solver_name];
+        auto casadi_final_res = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
+        const auto& history = casadi_histories[solver_name];
+        bool success = casadi_success[solver_name];
         
-    //     std::string planner_name = "CasADi-" + solver_name;
-    //     std::cout << std::left << std::setw(18) << planner_name
-    //               << std::setw(12) << (success ? "SUCCESS" : "FAILED")
-    //               << std::setw(10) << history.total_iterations
-    //               << std::setw(15) << casadi_final_res.first
-    //               << casadi_final_res.second << "\n";
-    // }
+        std::string planner_name = "CasADi-" + solver_name;
+        std::cout << std::left << std::setw(18) << planner_name
+                  << std::setw(12) << (success ? "SUCCESS" : "FAILED")
+                  << std::setw(10) << history.total_iterations
+                  << std::setw(15) << casadi_final_res.first
+                  << casadi_final_res.second << "\n";
+    }
 
     std::cout << std::string(70, '-') << "\n";
 
@@ -357,14 +453,20 @@ int main() {
         best_planner = "NGD";
     }
     
-    // for (const auto& solver_name : casadi_solvers) {
-    //     if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
-    //     auto res = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
-    //     if (res.first < best_cost && !std::isnan(res.first)) {
-    //         best_cost = res.first;
-    //         best_planner = "CasADi-" + solver_name;
-    //     }
-    // }
+    // NEW: Include STOMP in comparison
+    if (stomp_final_res.first < best_cost && !std::isnan(stomp_final_res.first)) {
+        best_cost = stomp_final_res.first;
+        best_planner = "STOMP";
+    }
+    
+    for (const auto& solver_name : casadi_solvers) {
+        if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
+        auto res = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
+        if (res.first < best_cost && !std::isnan(res.first)) {
+            best_cost = res.first;
+            best_planner = "CasADi-" + solver_name;
+        }
+    }
     
     std::cout << "\n★ Best result: " << best_planner << " with total cost = " << best_cost << "\n";
     std::cout << "\n=================================================\n";

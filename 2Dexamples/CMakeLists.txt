@@ -22,6 +22,7 @@ endif()
 find_package(SFML 3 COMPONENTS System Window Graphics Audio Network REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(stomp REQUIRED)
 
 # --- CasADi Detection ---
 set(CASADI_SEARCH_PATHS
@@ -52,7 +53,7 @@ foreach(exe ${ALL_TARGETS})
     target_include_directories(${exe} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../examples)
     
     # Base libraries
-    target_link_libraries(${exe} PRIVATE SFML::System SFML::Window SFML::Graphics ${YAML_CPP_LIB} Eigen3::Eigen ${PLATFORM_LIBS} ${CASADI_LIBRARY} OpenMP::OpenMP_CXX)
+    target_link_libraries(${exe} PRIVATE SFML::System SFML::Window SFML::Graphics ${YAML_CPP_LIB} Eigen3::Eigen ${PLATFORM_LIBS} ${CASADI_LIBRARY} OpenMP::OpenMP_CXX stomp)
 
     target_compile_options(${exe} PRIVATE 
         -O3 -march=native -ffast-math

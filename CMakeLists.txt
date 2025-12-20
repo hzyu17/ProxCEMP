@@ -7,10 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find dependencies
 find_package(Eigen3 REQUIRED)
-
 find_package(CASADI REQUIRED)
-
 find_package(OpenMP REQUIRED)
+find_package(stomp REQUIRED)
 
 # Include Casadi headers
 include_directories(${CASADI_INCLUDE_DIRS})

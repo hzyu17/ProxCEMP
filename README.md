@@ -225,6 +225,8 @@ The `2Dexamples/` directory contains three visualization tools:
    - Shows how sampling noise spreads in workspace
    - Useful for understanding algorithm behavior
 
+### ROS MoveIt Integration: [https://github.com/hzyu17/pce_ros](https://github.com/hzyu17/pce_ros)
+
 ## Algorithm Details
 
 ### Proximal Cross-Entropy Method (PCE)
@@ -253,16 +255,6 @@ NGD uses the natural gradient of expected cost:
 - `temperature`: Scales gradient estimates
 
 ## Configuration Options
-
-### Environment
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `map_width` | Environment width | 800 |
-| `map_height` | Environment height | 600 |
-| `num_obstacles` | Number of obstacles | 20 |
-| `obstacle_radius` | Obstacle size | 20.0 |
-| `clearance_distance` | Start/goal clearance | 100.0 |
 
 ### Cost Function
 
