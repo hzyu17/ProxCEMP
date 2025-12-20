@@ -1,48 +1,52 @@
 # ProxCEMP: Proximal Cross-Entropy Motion Planning
 
-A modern C++ motion planning library implementing sampling-based trajectory optimization algorithms with emphasis on collision avoidance and smooth motion generation.
+A high-performance C++ library for sampling-based trajectory optimization, featuring gradient-free algorithms for collision-free motion planning in N-dimensional configuration spaces.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Examples](#examples)
+- [Algorithm Details](#algorithm-details)
+- [Configuration Reference](#configuration-reference)
+- [Project Structure](#project-structure)
+- [Citation](#citation)
+- [License](#license)
+
+---
 
 ## Overview
 
-ProxCEMP provides efficient, gradient-free optimization methods for trajectory planning in configuration spaces with obstacles. The library features a clean task-based architecture that separates optimization algorithms from problem-specific cost computations.
+ProxCEMP provides efficient, gradient-free optimization methods for trajectory planning in cluttered environments. The library implements a task-based architecture that cleanly separates optimization algorithms from problem-specific cost computations, enabling easy extension to new robot platforms and planning scenarios.
 
 ### Key Features
 
-- **Multiple Optimization Algorithms**
-  - **PCE (Proximal Cross-Entropy Method)**: Weighted sample-based trajectory optimization
-  - **NGD (Natural Gradient Descent)**: Gradient-based optimization using natural gradients
-  
-- **Flexible Architecture**
-  - Task-based design separating algorithm from problem definition
-  - Header-only core library for easy integration
-  - Support for arbitrary N-dimensional configuration spaces
-  - Pluggable forward kinematics for robot-specific transformations
+| Category | Features |
+|----------|----------|
+| **Algorithms** | Proximal Cross-Entropy Method (PCE), Natural Gradient Descent (NGD), STOMP, CasADi-based solvers |
+| **Architecture** | Task-based design, header-only core, N-dimensional support, pluggable forward kinematics |
+| **Collision Avoidance** | SDF-based detection, configurable safety margins, N-dimensional obstacles |
+| **Trajectory Quality** | Smoothness optimization, configurable discretization, start/goal constraints |
 
-- **Robust Collision Avoidance**
-  - Signed distance field (SDF) based collision detection
-  - Configurable safety margins and collision thresholds
-  - N-dimensional obstacle representation
-
-- **Trajectory Quality**
-  - Smoothness optimization via acceleration minimization
-  - Configurable trajectory discretization
-  - Start/goal constraint enforcement
-
+---
 
 ## Installation
 
 ### Prerequisites
 
-**Required:**
-- C++17 compatible compiler (GCC 7+, Clang 5+, MSVC 2017+)
-- CMake 3.10+
-- [Eigen3](https://eigen.tuxfamily.org/) (3.3+)
-
-**Optional:**
-- [yaml-cpp](https://github.com/jbeder/yaml-cpp) (for configuration files)
-- [SFML 3](https://www.sfml-dev.org/) (for visualization)
-- [GoogleTest](https://github.com/google/googletest) (for testing)
-- [nlohmann/json](https://github.com/nlohmann/json) (for obstacle map serialization)
+| Dependency | Version | Required |
+|------------|---------|----------|
+| C++ Compiler | C++17 (GCC 7+, Clang 5+, MSVC 2017+) | ✓ |
+| CMake | 3.10+ | ✓ |
+| Eigen3 | 3.3+ | ✓ |
+| yaml-cpp | — | Optional |
+| SFML | 3.0+ | Optional (visualization) |
+| GoogleTest | — | Optional (testing) |
+| nlohmann/json | 3.0+ | Optional (serialization) |
 
 ### Ubuntu/Debian
 
@@ -50,107 +54,69 @@ ProxCEMP provides efficient, gradient-free optimization methods for trajectory p
 # Install dependencies
 sudo apt-get update
 sudo apt-get install -y \
-    build-essential \
-    cmake \
-    libeigen3-dev \
-    libyaml-cpp-dev \
-    libsfml-dev \
-    libgtest-dev \
-    nlohmann-json3-dev
+    build-essential cmake libeigen3-dev \
+    libyaml-cpp-dev libsfml-dev libgtest-dev nlohmann-json3-dev
 
-# Clone repository
+# Clone and build
 git clone --recurse-submodules https://github.com/hzyu17/ProxCEMP.git
-cd ProxCEMP
-
-# Build core library
-mkdir build && cd build
-cmake ..
-make
-sudo make install
+cd ProxCEMP && mkdir build && cd build
+cmake .. && make && sudo make install
 ```
 
 ### macOS
 
 ```bash
-# Install dependencies via Homebrew
+# Install dependencies
 brew install cmake eigen yaml-cpp sfml googletest nlohmann-json
 
 # Clone and build
 git clone --recurse-submodules https://github.com/hzyu17/ProxCEMP.git
-cd ProxCEMP
-mkdir build && cd build
-cmake ..
-make
-sudo make install
+cd ProxCEMP && mkdir build && cd build
+cmake .. && make && sudo make install
 ```
 
-### Building 2D Examples
+---
+
+## Quick Start
+
+### Building Examples
 
 ```bash
-cd 2Dexamples
-mkdir build && cd build
-cmake ..
-make
+cd 2Dexamples && mkdir build && cd build
+cmake .. && make
 
 # Run examples
-./main                              # Compare PCE vs NGD planners
-./visualize_collision_checking      # Interactive collision visualization
-./visualize_noisy_trj              # Visualize smoothness noise distribution
+./main                          # Compare optimization algorithms
+./visualize_collision_checking  # Interactive collision visualization
+./visualize_noisy_trj           # Smoothness noise distribution
 ```
-<p style="text-align:center;">
-<img src="2Dexamples/figures/noise_trj.png" width="350" alt="Noisy Trajectory Samples">
-<img src="2Dexamples/figures/collision.png" width="350" alt="Initial Collisions">
-<img src="2Dexamples/figures/noise_trj3d.png" width="350" alt="Noisy Trajectory Samples, 3D">
-<img src="2Dexamples/figures/collision3d.png" width="350" alt="Initial Collisions, 3D">
 
-</p>
-
-<p style="text-align:center;">
-<img src="2Dexamples/figures/pce_optimization_cost_convergence.png" width="350" alt="PCE Costs">
-<img src="2Dexamples/figures/ngd_optimization_cost_convergence.png" width="350" alt="NGD Costs">
-</p>
-
-<p style="text-align:center;">
-<img src="2Dexamples/figures/pce_anim.gif" width="350" alt="PCE Results">
-<img src="2Dexamples/figures/ngd_anim.gif" width="350" alt="NGD Results">
-</p>
-  
-### 1. Configuration File Example
+### Minimal Configuration
 
 ```yaml
 # config.yaml
 experiment:
   random_seed: 999
-  visualize_initial_state: true
 
 environment:
   map_width: 800
   map_height: 600
   num_obstacles: 20
   obstacle_radius: 20.0
-  clearance_distance: 100.0
-  
-  cost:
-    epsilon_sdf: 10.0
-    sigma_obs: 10.0
 
 motion_planning:
   num_dimensions: 2
   num_discretization: 50
-  total_time: 10.0
-  node_collision_radius: 15.0
   start_position: [50.0, 550.0]
   goal_position: [750.0, 50.0]
 
 pce_planner:
   num_samples: 3000
   num_iterations: 20
-  eta: 1.0
   temperature: 1.5
-  convergence_threshold: 0.01
 ```
 
-### 2. Custom Task Implementation
+### Custom Task Implementation
 
 ```cpp
 #include <task.h>
@@ -158,147 +124,208 @@ pce_planner:
 class MyCustomTask : public pce::Task {
 public:
     float computeStateCost(const Trajectory& trajectory) const override {
-        // Your custom collision cost computation
         float cost = 0.0f;
-        // ... implementation ...
+        // Custom collision cost computation
         return cost;
     }
     
     bool filterTrajectory(Trajectory& trajectory, int iteration) override {
         // Optional: apply constraints (e.g., joint limits)
-        return false;  // Return true if modified
+        return false;
     }
 };
 ```
 
-## Project Structure
-
-```
-ProxCEMP/
-├── include/                      # Header-only library
-│   ├── PCEMotionPlanner.h       # PCE algorithm implementation
-│   ├── NGDMotionPlanner.h       # NGD algorithm implementation
-│   ├── MotionPlanner.h          # Base planner interface
-│   ├── task.h                   # Task interface (STOMP-style)
-│   ├── CollisionAvoidanceTask.h # Collision avoidance task
-│   ├── Trajectory.h             # Trajectory representation
-│   ├── ObstacleMap.h            # N-D obstacle management
-│   ├── ForwardKinematics.h      # FK transformations
-│   └── visualization.h          # SFML visualization utilities
-│
-├── 2Dexamples/                  # 2D planning examples
-│   ├── src/
-│   │   ├── main.cpp            # PCE vs NGD comparison
-│   │   ├── visualize_collision_checking.cpp
-│   │   └── visualize_noisy_trj.cpp
-│   ├── configs/
-│   │   └── config.yaml         # Example configuration
-│   └── tests/
-│       └── test_determinism.cpp
-│
-├── config_editor_tkinter.py     # MuJoCo mobile manipulator tools
-├── motion_planner.py
-├── view_trajectory.py
-│
-├── Dockers/                     # ROS MoveIt benchmarking
-│   └── ROS1MoveIt/
-│
-├── CMakeLists.txt              # Core library build
-└── README.md
-```
+---
 
 ## Examples
 
 ### 2D Point Navigation
 
-The `2Dexamples/` directory contains three visualization tools:
+The library includes three visualization tools for 2D planning scenarios:
 
-1. **`main`**: Compare PCE and NGD planners side-by-side
-   ```bash
-   cd 2Dexamples/build
-   ./main
-   ```
+| Executable | Description | Key Controls |
+|------------|-------------|--------------|
+| `main` | Algorithm comparison (PCE, NGD, STOMP, CasADi) | Automatic execution |
+| `visualize_collision_checking` | Interactive trajectory optimization | `SPACE`: optimize, `R`: reset, `C`: toggle spheres |
+| `visualize_noisy_trj` | Smoothness noise distribution N(0, R⁻¹) | `S`: save PNG, `L`: toggle legend |
 
-2. **`visualize_collision_checking`**: Interactive trajectory editor
-   - Press `SPACE` to run optimization
-   - Press `R` to reset trajectory
-   - Press `C` to toggle collision spheres
-   - Press `ESC` to quit
+### Visualization Gallery
 
-3. **`visualize_noisy_trj`**: Visualize smoothness noise distribution N(0, R⁻¹)
-   - Shows how sampling noise spreads in workspace
-   - Useful for understanding algorithm behavior
+<p align="center">
+  <img src="2Dexamples/figures/noise_trj.png" width="400" alt="2D Trajectory Samples">
+  <img src="2Dexamples/figures/collision.png" width="400" alt="2D Collision Visualization">
+</p>
+<p align="center">
+  <em>Left: Sampled trajectories from smoothness prior. Right: Collision status visualization.</em>
+</p>
 
-### ROS MoveIt Integration: [https://github.com/hzyu17/pce_ros](https://github.com/hzyu17/pce_ros)
+<p align="center">
+  <img src="2Dexamples/figures/noise_trj3d.png" width="400" alt="3D Trajectory Samples">
+  <img src="2Dexamples/figures/collision3d.png" width="400" alt="3D Collision Visualization">
+</p>
+<p align="center">
+  <em>3D trajectory visualization with interactive rotation and lighting.</em>
+</p>
+
+<p align="center">
+  <img src="2Dexamples/figures/pce_optimization_cost_convergence.png" width="400" alt="PCE Cost Convergence">
+  <img src="2Dexamples/figures/ngd_optimization_cost_convergence.png" width="400" alt="NGD Cost Convergence">
+</p>
+<p align="center">
+  <em>Cost convergence comparison between PCE and NGD algorithms.</em>
+</p>
+
+<p align="center">
+  <img src="2Dexamples/figures/pce_anim.gif" width="400" alt="PCE Optimization">
+  <img src="2Dexamples/figures/ngd_anim.gif" width="400" alt="NGD Optimization">
+</p>
+<p align="center">
+  <em>Optimization progression: PCE (left) vs NGD (right).</em>
+</p>
+
+### ROS Integration
+
+MoveIt integration is available at: [https://github.com/hzyu17/pce_ros](https://github.com/hzyu17/pce_ros)
+
+<p align="center">
+  <img src="2Dexamples/figures/box.webp" width="400" alt="Box">
+  <img src="2Dexamples/figures/kitchen.webp" width="400" alt="Kitchen">
+  <img src="2Dexamples/figures/table.webp" width="400" alt="Table">
+  <img src="2Dexamples/figures/bookshelf.webp" width="400" alt="Bookshelf">
+</p>
+<p align="center">
+  <em>Motion Planning for 7-DOF Robot Arm in various scenarios.</em>
+</p>
+
+---
 
 ## Algorithm Details
 
 ### Proximal Cross-Entropy Method (PCE)
 
-PCE is a weighted sampling-based optimization method that:
-1. Samples trajectories from a smoothness prior N(Y_k, R⁻¹)
-2. Evaluates collision costs for each sample
-3. Computes importance weights based on costs
-4. Updates trajectory via weighted mean: Y_{k+1} = Σ w_m (Y_k + ε_m)
+PCE is a weighted sampling-based optimization method that iteratively refines trajectories through importance-weighted updates.
 
-**Key parameters:**
-- `num_samples`: Number of trajectory samples per iteration
-- `temperature`: Controls weight concentration (higher = more uniform)
-- `eta/gamma`: Learning rate parameters
+**Algorithm:**
+1. Sample trajectories from smoothness prior: $\tilde{Y}_m \sim \mathcal{N}(Y_k, R^{-1})$
+2. Evaluate collision costs: $S(\tilde{Y}_m)$
+3. Compute importance weights: $w_m \propto \exp(-S(\tilde{Y}_m) / \tau)$
+4. Update trajectory: $Y_{k+1} = \sum_m w_m \tilde{Y}_m$
+
+**Parameters:**
+
+| Parameter | Description | Recommended Range |
+|-----------|-------------|-------------------|
+| `num_samples` | Trajectory samples per iteration | 1000–5000 |
+| `temperature` | Weight concentration (τ) | 0.5–2.0 |
+| `eta` | Learning rate | 0.5–1.5 |
+| `num_iterations` | Maximum iterations | 20–100 |
 
 ### Natural Gradient Descent (NGD)
 
-NGD uses the natural gradient of expected cost:
-1. Samples trajectories from smoothness prior
-2. Computes collision costs
-3. Estimates gradient: ∇ = E[S(Ỹ)ε]
-4. Updates: Y_{k+1} = (1-η)Y_k - η∇
+NGD leverages the natural gradient of expected cost for efficient trajectory updates.
 
-**Key parameters:**
-- `learning_rate`: Step size for gradient updates
-- `temperature`: Scales gradient estimates
+**Algorithm:**
+1. Sample trajectories: $\tilde{Y}_m \sim \mathcal{N}(Y_k, R^{-1})$
+2. Compute noise: $\epsilon_m = \tilde{Y}_m - Y_k$
+3. Estimate natural gradient: $\nabla = \mathbb{E}[S(\tilde{Y})\epsilon]$
+4. Update: $Y_{k+1} = (1-\eta)Y_k - \eta\nabla$
 
-## Configuration Options
+**Parameters:**
 
-### Cost Function
+| Parameter | Description | Recommended Range |
+|-----------|-------------|-------------------|
+| `learning_rate` | Gradient step size (η) | 1e-4–1e-2 |
+| `num_samples` | Samples for gradient estimation | 100–500 |
+| `temperature` | Gradient scaling | 0.5–2.0 |
+
+---
+
+## Configuration Reference
+
+### Environment Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `map_width`, `map_height` | Workspace dimensions | 800, 600 |
+| `num_obstacles` | Number of obstacles | 20 |
+| `obstacle_radius` | Obstacle size | 20.0 |
+| `clearance_distance` | Minimum start/goal clearance | 100.0 |
+
+### Cost Function Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `epsilon_sdf` | SDF collision threshold | 10.0 |
 | `sigma_obs` | Collision cost weight | 10.0 |
 
-### Motion Planning
+### Motion Planning Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `num_dimensions` | Config space dimensions | 2 |
+| `num_dimensions` | Configuration space dimensions | 2 |
 | `num_discretization` | Trajectory waypoints | 50 |
-| `total_time` | Trajectory duration | 10.0 |
-| `node_collision_radius` | Safety margin | 15.0 |
+| `total_time` | Trajectory duration (s) | 10.0 |
+| `node_collision_radius` | Safety margin per waypoint | 15.0 |
 
-## Performance Tips
+---
 
-1. **Tune sampling rate**: Start with 1000-3000 samples, increase for complex environments
-2. **Adjust temperature**: Higher temperature (1.5-2.0) for exploration, lower (0.5-1.0) for refinement
-3. **Discretization tradeoff**: More nodes = smoother but slower
-4. **Early stopping**: Use `convergence_threshold` to stop when improvement is negligible
+## Project Structure
+
+```
+ProxCEMP/
+├── include/                          # Header-only library
+│   ├── PCEMotionPlanner.h           # PCE algorithm
+│   ├── NGDMotionPlanner.h           # NGD algorithm
+│   ├── STOMPMotionPlanner.h         # STOMP algorithm
+│   ├── CasadiMotionPlanner.h        # CasADi-based solvers
+│   ├── MotionPlanner.h              # Base planner interface
+│   ├── task.h                       # Task interface
+│   ├── Trajectory.h                 # Trajectory representation
+│   ├── ObstacleMap.h                # N-D obstacle management
+│   ├── ForwardKinematics.h          # FK transformations
+│   └── visualization.h              # SFML visualization
+│
+├── 2Dexamples/                       # 2D/3D planning examples
+│   ├── src/                         # Example source files
+│   ├── configs/                     # Configuration files
+│   ├── figures/                     # Generated figures
+│   └── tests/                       # Unit tests
+│
+├── Dockers/                          # Docker environments
+│   └── ROS1MoveIt/                  # ROS MoveIt benchmarking
+│
+├── CMakeLists.txt
+└── README.md
+```
+
+---
 
 ## Citation
 
 If you use ProxCEMP in your research, please cite:
 
+```bibtex
+@article{proxcemp2025,
+  title     = {ProxCEMP: Proximal Cross-Entropy Motion Planning},
+  author    = {Yu, Hongzhe and others},
+  journal   = {IEEE Transactions on Robotics},
+  year      = {2025},
+  note      = {To appear}
+}
 ```
-To appear soon.
-```
+
+---
 
 ## License
 
-MIT.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+---
 
 ## Related Work
 
-- **STOMP**: Stochastic Trajectory Optimization for Motion Planning
-- **CHOMP**: Covariant Hamiltonian Optimization for Motion Planning  
-- **TrajOpt**: Sequential Convex Optimization for motion planning
-- **GPMP**: Gaussian Process Motion Planning
-- **GVIMP** Gaussian Variational Inference Motion Planning
+- **STOMP**: Stochastic Trajectory Optimization for Motion Planning ([Kalakrishnan et al., 2011](https://ieeexplore.ieee.org/document/5980280))
+- **CHOMP**: Covariant Hamiltonian Optimization for Motion Planning ([Ratliff et al., 2009](https://journals.sagepub.com/doi/10.1177/0278364913488805))
+- **GPMP**: Gaussian Process Motion Planning ([Mukadam et al., 2018](https://journals.sagepub.com/doi/10.1177/0278364918802969))
+- **GVIMP**: Gaussian Variational Inference Motion Planning ([Yu et al., 2023](https://ieeexplore.ieee.org/document/10160723))
