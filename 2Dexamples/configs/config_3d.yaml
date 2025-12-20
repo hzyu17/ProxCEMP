@@ -1,0 +1,138 @@
+# 3D Motion Planning Configuration
+# Adapted from 2D configuration for 3D trajectory optimization
+
+casadi_planner:
+  adam:
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1e-8
+    learning_rate: 0.01
+  collision_weight: 10.0
+  finite_diff_eps: 1e-4
+  gradient_descent:
+    learning_rate: 0.001
+    lr_decay: 1.0
+    momentum: 0.9
+    use_nesterov: true
+  ipopt:
+    acceptable_iter: 5
+    acceptable_tol: 1e-4
+    hessian_approximation: limited-memory
+    linear_solver: mumps
+    max_cpu_time: 120.0           # Increased for 3D complexity
+    print_level: 0
+    warm_start_init_point: 'yes'
+  lbfgs:
+    max_iterations: 100
+    history_size: 10
+  max_iterations: 500
+  scp:
+    accept_ratio: 0.1
+    convergence_tol: 1e-4
+    good_ratio: 0.75
+    inner_max_iter: 100
+    max_outer_iter: 50
+    trust_expand: 2.0
+    trust_region_init: 10.0
+    trust_region_max: 1000.0
+    trust_region_min: 1e-4
+    trust_shrink: 0.5
+  solver: ipopt
+  sqp:
+    beta: 0.5
+    c1: 1e-4
+    hessian_approximation: bfgs
+    max_iter_ls: 20
+    qp_solver: qpoases
+    tolerance: 1e-6
+  verbose_solver: true
+  max_iterations: 5000
+
+environment:
+  clearance_distance: 100.0
+  cost:
+    epsilon_sdf: 10.0
+    sigma_obs: 1.0
+  # 3D workspace bounds
+  map_width: 800                  # X dimension
+  map_height: 600                 # Y dimension
+  map_depth: 400                  # Z dimension (NEW)
+  num_obstacles: 50               # Slightly more for 3D space
+  obstacle_radius: 25.0           # Slightly larger for 3D visibility
+  # Alternative: specify bounds explicitly
+  workspace_bounds:
+    x_min: 0.0
+    x_max: 800.0
+    y_min: 0.0
+    y_max: 600.0
+    z_min: 0.0
+    z_max: 400.0
+
+experiment:
+  config_file: config_3d.yaml
+  enable_logging: true
+  log_directory: ./logs_3d
+  random_seed: 900
+  visualize_initial_state: false
+
+motion_planning:
+  # 3D start position [x, y, z]
+  start_position:
+    - 50.0
+    - 550.0
+    - 50.0
+  # 3D goal position [x, y, z]
+  goal_position:
+    - 750.0
+    - 50.0
+    - 350.0
+  node_collision_radius: 15.0
+  num_dimensions: 3               # Changed from 2 to 3
+  num_discretization: 500
+  total_time: 10.0
+
+ngd_planner:
+  cov_scale_final: 0.01
+  cov_scale_initial: 1.0
+  covariance_schedule: cosine
+  ema_alpha: 0.5
+  learning_rate: 1e-4
+  num_iterations: 75              # Increased for 3D convergence
+  num_samples: 150                # More samples for 3D exploration
+  temperature: 1.5
+  temperature_final: 0.05
+
+pce_planner:
+  cov_scale_final: 0.01
+  cov_scale_initial: 1.0
+  covariance_schedule: cosine
+  elite_ratio: 0.1
+  ema_alpha: 0.2
+  eta: 1.5
+  num_iterations: 75              # Increased for 3D convergence
+  num_samples: 1500               # More samples for 3D (scales with dimensionality)
+  temperature: 1.5
+  temperature_final: 0.05
+
+stomp:
+  # Core STOMP parameters
+  num_iterations: 150             # Increased for 3D
+  num_rollouts: 15                # More rollouts for 3D exploration
+  max_rollouts: 30                # Must be > num_rollouts
+  num_iterations_after_valid: 5
+  
+  # Time discretization
+  delta_t: 0.1
+  
+  # Cost weights
+  control_cost_weight: 0.0
+  
+  # Probability computation
+  exponentiated_cost_sensitivity: 10.0
+  
+  # Noise generation - slightly higher for 3D
+  noise_stddev: 25.0              # Increased for 3D exploration
+  noise_decay: 0.95
+  
+  # Convergence
+  cost_tolerance: 1e-4

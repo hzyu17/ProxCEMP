@@ -7,7 +7,7 @@
 
 #include "../include/PCEMotionPlanner.h"
 #include "../examples/CollisionAvoidanceTask.h"
-#include "../include/visualization.h"
+#include "../examples/visualization.h"
 
 // --- Constants ---
 namespace {

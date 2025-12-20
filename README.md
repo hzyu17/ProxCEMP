@@ -99,6 +99,10 @@ make
 ```
 <p style="text-align:center;">
 <img src="2Dexamples/figures/noise_trj.png" width="350" alt="Noisy Trajectory Samples">
+<img src="2Dexamples/figures/collision.png" width="350" alt="Initial Collisions">
+<img src="2Dexamples/figures/noise_trj3d.png" width="350" alt="Noisy Trajectory Samples, 3D">
+<img src="2Dexamples/figures/collision3d.png" width="350" alt="Initial Collisions, 3D">
+
 </p>
 
 <p style="text-align:center;">

@@ -7,8 +7,12 @@
 
 #include "../include/PCEMotionPlanner.h" 
 #include "../examples/CollisionAvoidanceTask.h"
-#include "../include/visualization.h"
+#include "../examples/visualization.h"
 #include <string>
+
+namespace {
+    constexpr float SAVE_SCALE = 4.0f;  // 4x scale for ~400 DPI print quality
+}
 
 int main() {
     // --- 1. Load Configuration ---
@@ -75,6 +79,7 @@ int main() {
     std::cout << "SPACE:  Start optimization\n";
     std::cout << "R:      Reset (regenerate trajectory)\n";
     std::cout << "C:      Toggle collision spheres display\n";
+    std::cout << "S:      Save high-res PNG (4x)\n";
     std::cout << "ESC:    Quit\n";
     std::cout << "\nCollision sphere colors:\n";
     std::cout << "  GREEN  = Safe (no collision)\n";
@@ -84,6 +89,7 @@ int main() {
 
     bool show_collision_spheres = true;
     float collision_threshold = 10.0f;
+    int save_counter = 0;
 
     // --- 5. Main Loop ---
     while (window.isOpen()) {
@@ -126,6 +132,57 @@ int main() {
                         std::cout << "Optimization completed successfully\n";
                     } else {
                         std::cout << "Optimization failed or interrupted\n";
+                    }
+                }
+                
+                if (key_event->code == sf::Keyboard::Key::S) {
+                    // Save high resolution PNG (4x scale)
+                    unsigned int save_width = static_cast<unsigned int>(map_width * SAVE_SCALE);
+                    unsigned int save_height = static_cast<unsigned int>(map_height * SAVE_SCALE);
+                    
+                    sf::RenderTexture render_texture;
+                    if (render_texture.resize({save_width, save_height})) {
+                        render_texture.clear(sf::Color(240, 240, 240));
+                        
+                        // Use scaled view to render at higher resolution
+                        sf::View scaled_view(sf::FloatRect({0.f, 0.f}, 
+                                            {static_cast<float>(map_width), static_cast<float>(map_height)}));
+                        scaled_view.setViewport(sf::FloatRect({0.f, 0.f}, {1.f, 1.f}));
+                        render_texture.setView(scaled_view);
+                        
+                        const Trajectory& current_traj = planner.getCurrentTrajectory();
+                        
+                        if (show_collision_spheres) {
+                            visualizeTrajectoryWithCollisionSpheres(
+                                render_texture, 
+                                *obstacle_map, 
+                                current_traj, 
+                                collision_threshold,
+                                false  // don't clear - already cleared
+                            );
+                        } else {
+                            visualizeTrajectory(
+                                render_texture, 
+                                *obstacle_map, 
+                                current_traj, 
+                                sf::Color(0, 0, 255, 255),
+                                false
+                            );
+                        }
+                        
+                        render_texture.display();
+                        
+                        sf::Image screenshot = render_texture.getTexture().copyToImage();
+                        std::string filename = "collision_2d_" + std::to_string(save_counter++) + "_highres.png";
+                        
+                        if (screenshot.saveToFile(filename)) {
+                            std::cout << "Saved: " << filename 
+                                      << " (" << save_width << "x" << save_height << " pixels)\n";
+                        } else {
+                            std::cerr << "Failed to save image!\n";
+                        }
+                    } else {
+                        std::cerr << "Failed to create render texture for saving!\n";
                     }
                 }
             }
