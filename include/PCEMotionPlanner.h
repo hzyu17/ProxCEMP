@@ -374,7 +374,7 @@ public:
             task_->postIteration(iteration, current_total_cost, current_trajectory_);
         }
 
-        current_trajectory_ = trajectory_history_[best_iteration];
+        current_trajectory_ = trajectory_history_[best_iteration-1];
         task_->done(true, num_iterations_, best_cost, current_trajectory_);
         return true;
     }
