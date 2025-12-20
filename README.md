@@ -82,7 +82,7 @@ cmake .. && make && sudo make install
 ### Building Examples
 
 ```bash
-cd 2Dexamples && mkdir build && cd build
+cd Examples2d3d && mkdir build && cd build
 cmake .. && make
 
 # Run examples
@@ -153,32 +153,32 @@ The library includes three visualization tools for 2D planning scenarios:
 ### Visualization Gallery
 
 <p align="center">
-  <img src="2Dexamples/figures/noise_trj.png" width="400" alt="2D Trajectory Samples">
-  <img src="2Dexamples/figures/collision.png" width="400" alt="2D Collision Visualization">
+  <img src="Examples2d3d/figures/noise_trj.png" width="400" alt="2D Trajectory Samples">
+  <img src="Examples2d3d/figures/collision.png" width="400" alt="2D Collision Visualization">
 </p>
 <p align="center">
   <em>Left: Sampled trajectories from smoothness prior. Right: Collision status visualization.</em>
 </p>
 
 <p align="center">
-  <img src="2Dexamples/figures/noise_trj3d.png" width="400" alt="3D Trajectory Samples">
-  <img src="2Dexamples/figures/collision3d.png" width="400" alt="3D Collision Visualization">
+  <img src="Examples2d3d/figures/noise_trj3d.png" width="400" alt="3D Trajectory Samples">
+  <img src="Examples2d3d/figures/collision3d.png" width="400" alt="3D Collision Visualization">
 </p>
 <p align="center">
   <em>3D trajectory visualization with interactive rotation and lighting.</em>
 </p>
 
 <p align="center">
-  <img src="2Dexamples/figures/pce_optimization_cost_convergence.png" width="400" alt="PCE Cost Convergence">
-  <img src="2Dexamples/figures/ngd_optimization_cost_convergence.png" width="400" alt="NGD Cost Convergence">
+  <img src="Examples2d3d/figures/pce_optimization_cost_convergence.png" width="400" alt="PCE Cost Convergence">
+  <img src="Examples2d3d/figures/ngd_optimization_cost_convergence.png" width="400" alt="NGD Cost Convergence">
 </p>
 <p align="center">
   <em>Cost convergence comparison between PCE and NGD algorithms.</em>
 </p>
 
 <p align="center">
-  <img src="2Dexamples/figures/pce_anim.gif" width="400" alt="PCE Optimization">
-  <img src="2Dexamples/figures/ngd_anim.gif" width="400" alt="NGD Optimization">
+  <img src="Examples2d3d/figures/pce_anim.gif" width="400" alt="PCE Optimization">
+  <img src="Examples2d3d/figures/ngd_anim.gif" width="400" alt="NGD Optimization">
 </p>
 <p align="center">
   <em>Optimization progression: PCE (left) vs NGD (right).</em>
@@ -189,10 +189,10 @@ The library includes three visualization tools for 2D planning scenarios:
 MoveIt integration is available at: [https://github.com/hzyu17/pce_ros](https://github.com/hzyu17/pce_ros)
 
 <p align="center">
-  <img src="2Dexamples/figures/box.webp" width="400" alt="Box">
-  <img src="2Dexamples/figures/kitchen.webp" width="400" alt="Kitchen">
-  <img src="2Dexamples/figures/table.webp" width="400" alt="Table">
-  <img src="2Dexamples/figures/bookshelf.webp" width="400" alt="Bookshelf">
+  <img src="Examples2d3d/figures/box.webp" width="400" alt="Box">
+  <img src="Examples2d3d/figures/kitchen.webp" width="400" alt="Kitchen">
+  <img src="Examples2d3d/figures/table.webp" width="400" alt="Table">
+  <img src="Examples2d3d/figures/bookshelf.webp" width="400" alt="Bookshelf">
 </p>
 <p align="center">
   <em>Motion Planning for 7-DOF Robot Arm in various scenarios.</em>
@@ -286,7 +286,7 @@ ProxCEMP/
 │   ├── ForwardKinematics.h          # FK transformations
 │   └── visualization.h              # SFML visualization
 │
-├── 2Dexamples/                       # 2D/3D planning examples
+├── Examples2d3d/                       # 2D/3D planning examples
 │   ├── src/                         # Example source files
 │   ├── configs/                     # Configuration files
 │   ├── figures/                     # Generated figures
