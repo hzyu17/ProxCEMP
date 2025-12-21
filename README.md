@@ -308,8 +308,8 @@ If you use ProxCEMP in your research, please cite:
 ```bibtex
 @article{proxcemp2025,
   title     = {ProxCEMP: Proximal Cross-Entropy Motion Planning},
-  author    = {Yu, Hongzhe and others},
-  journal   = {IEEE Transactions on Robotics},
+  author    = {},
+  journal   = {},
   year      = {2025},
   note      = {To appear}
 }
