@@ -275,6 +275,7 @@ public:
             }
             
             std::vector<float> sample_collisions = task_->computeStateCostSimple(sample_trajectories);
+            for (auto& c : sample_collisions) c /= current_temp;
 
             // 3. Elite Selection
             std::vector<size_t> indices(M);
@@ -319,7 +320,7 @@ public:
             for (size_t i = 0; i < num_elites; ++i) {
                 size_t m = indices[i];
                 float normalized_cost = (raw_costs[i] - mean_cost) / std_cost;
-                float exponent = -gamma_ * normalized_cost / current_temp;
+                float exponent = -gamma_ * normalized_cost;
                 weights(m) = exponent;
                 max_exponent = std::max(max_exponent, exponent);
             }

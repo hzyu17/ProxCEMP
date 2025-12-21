@@ -339,12 +339,13 @@ public:
             
             // Batch evaluate
             std::vector<float> sample_collisions = task_->computeStateCostSimple(sample_trajectories);
+            for (auto& c : sample_collisions) c /= current_temp;
                         
             // 3. Update current trajectory
 
             // Compute natural gradient with temperature scaling
             for (size_t m = 0; m < M; ++m) {
-                natural_gradient += (sample_collisions[m] / current_temp) * epsilon_samples[m];
+                natural_gradient += (sample_collisions[m]) * epsilon_samples[m];
             }
             natural_gradient /= static_cast<float>(M);
             

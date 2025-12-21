@@ -134,18 +134,22 @@ struct StompPlannerConfig {
 
 
 /**
- * @brief STOMP Task adapter for CollisionAvoidanceTask
+ * @brief Forward declaration
+ */
+class StompMotionPlanner;
+
+/**
+ * @brief Stateless STOMP Task adapter - all state lives in StompMotionPlanner
  * 
- * Based on working StompTaskMinimal pattern.
+ * This class is intentionally minimal (just a vtable pointer + one raw pointer = 16 bytes)
+ * to avoid memory issues with the STOMP library.
  */
 class StompCollisionTask : public stomp::Task {
 public:
     using MatrixXd = Eigen::MatrixXd;
     using VectorXd = Eigen::VectorXd;
-    using VectorXf = Eigen::VectorXf;
     
-    // Default constructor - matches working pattern
-    StompCollisionTask() {
+    StompCollisionTask() : planner_(nullptr) {
         std::cout << "StompCollisionTask constructor (size=" << sizeof(*this) << ")\n";
     }
     
@@ -153,43 +157,18 @@ public:
         std::cout << "StompCollisionTask destructor\n";
     }
     
-    // Deferred initialization - call after STOMP is created
-    void setup(std::shared_ptr<CollisionAvoidanceTask> collision_task,
-               float noise_stddev, float noise_decay) {
-        collision_task_ = collision_task;
-        noise_stddev_ = noise_stddev;
-        noise_decay_ = noise_decay;
-        rng_.seed(std::random_device{}());
-        std::cout << "StompCollisionTask setup complete\n";
+    void setPlanner(StompMotionPlanner* planner) {
+        planner_ = planner;
     }
     
+    // All virtual methods delegate to planner
     bool generateNoisyParameters(const MatrixXd& parameters,
                                  std::size_t start_timestep,
                                  std::size_t num_timesteps,
                                  int iteration_number,
                                  int rollout_number,
                                  MatrixXd& parameters_noise,
-                                 MatrixXd& noise) override 
-    {
-        float decayed_stddev = noise_stddev_ * std::pow(noise_decay_, iteration_number);
-        std::normal_distribution<double> dist(0.0, decayed_stddev);
-        
-        noise.resize(parameters.rows(), parameters.cols());
-        parameters_noise.resize(parameters.rows(), parameters.cols());
-        
-        for (int d = 0; d < parameters.rows(); ++d) {
-            for (int t = 0; t < parameters.cols(); ++t) {
-                if (t == 0 || t == parameters.cols() - 1) {
-                    noise(d, t) = 0.0;
-                } else {
-                    noise(d, t) = dist(rng_);
-                }
-            }
-        }
-        
-        parameters_noise = parameters + noise;
-        return true;
-    }
+                                 MatrixXd& noise) override;
     
     bool computeNoisyCosts(const MatrixXd& parameters,
                            std::size_t start_timestep,
@@ -197,121 +176,39 @@ public:
                            int iteration_number,
                            int rollout_number,
                            VectorXd& costs,
-                           bool& validity) override 
-    {
-        costs.resize(num_timesteps);
-        costs.setZero();
-        
-        if (collision_task_) {
-            const auto& obs = collision_task_->getObstacleSoA();
-            if (!obs.empty()) {
-                const float epsilon = collision_task_->getConfig().epsilon_sdf;
-                const float sigma = collision_task_->getConfig().sigma_obs;
-                
-                for (size_t t = 1; t < num_timesteps - 1; ++t) {
-                    VectorXf pos(parameters.rows());
-                    for (int d = 0; d < parameters.rows(); ++d) {
-                        pos(d) = static_cast<float>(parameters(d, t));
-                    }
-                    
-                    // Vectorized collision cost
-                    Eigen::MatrixXf diff = obs.centers.colwise() - pos;
-                    Eigen::VectorXf distances = diff.colwise().norm();
-                    Eigen::VectorXf sdfs = distances - obs.combined_radii;
-                    Eigen::VectorXf hinges = (epsilon - sdfs.array()).max(0.0f);
-                    costs(t) = sigma * hinges.squaredNorm();
-                }
-            }
-        }
-        
-        validity = (costs.sum() < 1e-3);
-        return true;
-    }
+                           bool& validity) override;
     
     bool computeCosts(const MatrixXd& parameters,
                       std::size_t start_timestep,
                       std::size_t num_timesteps,
                       int iteration_number,
                       VectorXd& costs,
-                      bool& validity) override 
-    {
-        return computeNoisyCosts(parameters, start_timestep, num_timesteps,
-                                 iteration_number, -1, costs, validity);
-    }
+                      bool& validity) override;
     
     bool filterNoisyParameters(std::size_t start_timestep,
                                std::size_t num_timesteps,
                                int iteration_number,
                                int rollout_number,
                                MatrixXd& parameters,
-                               bool& filtered) override 
-    {
-        filtered = false;
-        return true;
-    }
+                               bool& filtered) override;
     
     bool filterParameterUpdates(std::size_t start_timestep,
                                 std::size_t num_timesteps,
                                 int iteration_number,
                                 const MatrixXd& parameters,
-                                MatrixXd& updates) override 
-    {
-        updates.col(0).setZero();
-        updates.col(updates.cols() - 1).setZero();
-        return true;
-    }
+                                MatrixXd& updates) override;
     
     void postIteration(std::size_t start_timestep,
                        std::size_t num_timesteps,
                        int iteration_number,
                        double cost,
-                       const MatrixXd& parameters) override 
-    {
-        current_iteration_ = iteration_number;
-        
-        // Store trajectory
-        Trajectory traj;
-        traj.nodes.resize(num_timesteps);
-        for (size_t t = 0; t < num_timesteps; ++t) {
-            traj.nodes[t].position.resize(parameters.rows());
-            for (int d = 0; d < parameters.rows(); ++d) {
-                traj.nodes[t].position(d) = static_cast<float>(parameters(d, t));
-            }
-        }
-        trajectory_history_.push_back(traj);
-        
-        if (iteration_number % 10 == 0) {
-            std::cout << "  STOMP Iteration " << iteration_number << ": cost = " << cost << "\n";
-        }
-    }
+                       const MatrixXd& parameters) override;
     
     void done(bool success, int total_iterations, double final_cost,
-              const MatrixXd& parameters) override 
-    {
-        std::cout << "STOMP " << (success ? "succeeded" : "failed")
-                  << " after " << total_iterations << " iterations"
-                  << " with cost " << final_cost << "\n";
-        converged_ = success;
-        final_cost_ = static_cast<float>(final_cost);
-    }
-    
-    // Accessors
-    const std::vector<Trajectory>& getTrajectoryHistory() const { return trajectory_history_; }
-    void clearHistory() { trajectory_history_.clear(); }
-    bool hasConverged() const { return converged_; }
-    float getFinalCost() const { return final_cost_; }
+              const MatrixXd& parameters) override;
 
 private:
-    // Member variables - initialized in setup() after STOMP construction
-    std::shared_ptr<CollisionAvoidanceTask> collision_task_;
-    float noise_stddev_ = 20.0f;
-    float noise_decay_ = 0.95f;
-    std::mt19937 rng_;
-    int current_iteration_ = 0;
-    
-    std::vector<Trajectory> trajectory_history_;
-    float final_cost_ = 0.0f;
-    bool converged_ = false;
+    StompMotionPlanner* planner_;  // Raw pointer to avoid shared_ptr overhead
 };
 
 } // namespace pce

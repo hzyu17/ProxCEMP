@@ -2,8 +2,7 @@
  * @file StompMotionPlanner.h
  * @brief STOMP-based motion planner wrapper
  * 
- * Provides a unified interface for STOMP optimization compatible
- * with the PCE/NGD planner comparison framework.
+ * All optimization state lives here; StompCollisionTask is a thin stateless wrapper.
  */
 #pragma once
 
@@ -13,15 +12,13 @@
 #include "Trajectory.h"
 #include <memory>
 #include <vector>
+#include <random>
 #include <iostream>
 
 namespace pce {
 
 /**
- * @brief STOMP Motion Planner
- * 
- * Wrapper class that integrates STOMP optimization with the
- * collision avoidance motion planning framework.
+ * @brief STOMP Motion Planner - holds all optimization state
  */
 class StompMotionPlanner {
 public:
@@ -33,127 +30,85 @@ public:
         : collision_task_(task)
         , initialized_(false)
         , stomp_(nullptr)
+        , noise_stddev_(20.0f)
+        , noise_decay_(0.95f)
+        , current_iteration_(0)
+        , final_cost_(0.0f)
+        , converged_(false)
     {
+        rng_.seed(std::random_device{}());
     }
     
     ~StompMotionPlanner() {
-        // Clean up STOMP first (it holds reference to task)
         if (stomp_) {
             delete stomp_;
             stomp_ = nullptr;
         }
-        // shared_ptr handles task cleanup automatically
     }
     
-    /**
-     * @brief Initialize the planner with configuration
-     */
     bool initialize(const StompPlannerConfig& config) {
         config_ = config;
+        noise_stddev_ = config.noise_stddev;
+        noise_decay_ = config.noise_decay;
         
-        // Validate configuration thoroughly
+        // Validate configuration
         if (config_.num_dimensions == 0) {
             std::cerr << "Error: num_dimensions cannot be 0\n";
             return false;
         }
         
         if (config_.num_timesteps < 10) {
-            std::cerr << "Error: num_timesteps must be at least 10 (STOMP uses finite differences)\n";
+            std::cerr << "Error: num_timesteps must be at least 10\n";
             return false;
         }
         
-        if (config_.start_position.size() != config_.num_dimensions) {
-            std::cerr << "Error: start_position size (" << config_.start_position.size() 
-                      << ") != num_dimensions (" << config_.num_dimensions << ")\n";
-            return false;
-        }
-        
-        if (config_.goal_position.size() != config_.num_dimensions) {
-            std::cerr << "Error: goal_position size (" << config_.goal_position.size() 
-                      << ") != num_dimensions (" << config_.num_dimensions << ")\n";
-            return false;
-        }
-        
-        if (config_.num_rollouts == 0) {
-            std::cerr << "Error: num_rollouts cannot be 0\n";
+        if (config_.start_position.size() != config_.num_dimensions ||
+            config_.goal_position.size() != config_.num_dimensions) {
+            std::cerr << "Error: Start/goal position dimensions mismatch\n";
             return false;
         }
         
         if (config_.max_rollouts <= config_.num_rollouts) {
             config_.max_rollouts = config_.num_rollouts + 1;
-            std::cout << "Warning: Adjusted max_rollouts to " << config_.max_rollouts << "\n";
         }
         
-        // Initialize trajectory first
         initializeTrajectory();
         
-        // Create STOMP configuration
         stomp::StompConfiguration stomp_config = config_.toStompConfig();
         
-        // Debug output
         std::cout << "STOMP Config Debug:\n"
                   << "  num_dimensions: " << stomp_config.num_dimensions << "\n"
                   << "  num_timesteps: " << stomp_config.num_timesteps << "\n"
                   << "  num_iterations: " << stomp_config.num_iterations << "\n"
                   << "  num_rollouts: " << stomp_config.num_rollouts << "\n"
-                  << "  max_rollouts: " << stomp_config.max_rollouts << "\n"
-                  << "  delta_t: " << stomp_config.delta_t << "\n";
+                  << "  max_rollouts: " << stomp_config.max_rollouts << "\n";
         
-        // Create STOMP task adapter using simple constructor (like minimal test)
+        // Create minimal stateless task
         std::cout << "Creating STOMP task adapter...\n";
-        auto stomp_task = std::make_shared<StompCollisionTask>();
+        stomp_task_ = std::make_shared<StompCollisionTask>();
+        std::cout << "Task size: " << sizeof(StompCollisionTask) << " bytes\n";
         
-        if (!stomp_task) {
-            std::cerr << "Error: Failed to create STOMP task adapter\n";
-            return false;
-        }
-        std::cout << "STOMP task adapter created (size=" << sizeof(StompCollisionTask) << ")\n";
+        // Set back-pointer BEFORE creating STOMP
+        stomp_task_->setPlanner(this);
         
-        // Store for later use
-        stomp_task_ptr_ = stomp_task;
-        
-        // Explicitly cast to stomp::TaskPtr
-        stomp::TaskPtr task_for_stomp = std::static_pointer_cast<stomp::Task>(stomp_task_ptr_);
-        
-        std::cout << "Task pointer created, use_count: " << task_for_stomp.use_count() 
-                  << ", creating STOMP optimizer...\n";
-        
-        // Create STOMP optimizer (like minimal test)
+        std::cout << "Creating STOMP optimizer...\n";
         try {
-            stomp_ = new stomp::Stomp(stomp_config, task_for_stomp);
+            stomp_ = new stomp::Stomp(stomp_config, stomp_task_);
         } catch (const std::exception& e) {
-            std::cerr << "Error creating STOMP optimizer: " << e.what() << "\n";
-            return false;
-        } catch (...) {
-            std::cerr << "Error: Unknown exception while creating STOMP optimizer\n";
+            std::cerr << "Error creating STOMP: " << e.what() << "\n";
             return false;
         }
         
         if (!stomp_) {
-            std::cerr << "Error: STOMP optimizer is null after creation\n";
+            std::cerr << "Error: STOMP is null\n";
             return false;
         }
         
-        std::cout << "STOMP created successfully!\n";
-        
-        // NOW setup the task with collision data (after STOMP is created)
-        stomp_task_ptr_->setup(collision_task_, config_.noise_stddev, config_.noise_decay);
-        
         initialized_ = true;
-        
-        std::cout << "STOMP Planner initialized successfully:\n"
-                  << "  Dimensions: " << config_.num_dimensions << "\n"
-                  << "  Timesteps: " << config_.num_timesteps << "\n"
-                  << "  Iterations: " << config_.num_iterations << "\n"
-                  << "  Rollouts: " << config_.num_rollouts << "\n"
-                  << "  Noise stddev: " << config_.noise_stddev << "\n";
-        
+        std::cout << "STOMP Planner initialized successfully\n";
         return true;
     }
     
-    /**
-     * @brief Run STOMP optimization
-     */
     bool solve() {
         if (!initialized_) {
             std::cerr << "Error: Planner not initialized\n";
@@ -162,16 +117,9 @@ public:
         
         std::cout << "\n=== Running STOMP Optimization ===\n";
         
-        // Clear previous history
-        if (stomp_task_ptr_) {
-            stomp_task_ptr_->clearHistory();
-        }
-        trajectory_history_.clear();
+        iteration_trajectories_.clear();
+        iteration_trajectories_.push_back(current_trajectory_);
         
-        // Store initial trajectory
-        trajectory_history_.push_back(current_trajectory_);
-        
-        // Convert start/goal to Eigen vectors
         VectorXd start(config_.num_dimensions);
         VectorXd goal(config_.num_dimensions);
         for (size_t d = 0; d < config_.num_dimensions; ++d) {
@@ -179,71 +127,120 @@ public:
             goal(d) = config_.goal_position[d];
         }
         
-        // Run STOMP optimization
         MatrixXd optimized_params;
         bool success = false;
         
         try {
             success = stomp_->solve(start, goal, optimized_params);
         } catch (const std::exception& e) {
-            std::cerr << "Exception during STOMP solve: " << e.what() << "\n";
+            std::cerr << "Exception during solve: " << e.what() << "\n";
             return false;
         }
         
-        // Update current trajectory
         if (success || optimized_params.size() > 0) {
             current_trajectory_ = matrixToTrajectory(optimized_params);
-        }
-        
-        // Collect trajectory history from task
-        if (stomp_task_ptr_) {
-            const auto& task_history = stomp_task_ptr_->getTrajectoryHistory();
-            for (const auto& traj : task_history) {
-                trajectory_history_.push_back(traj);
-            }
         }
         
         return success;
     }
     
-    /**
-     * @brief Cancel optimization (thread-safe)
-     */
-    bool cancel() {
-        if (stomp_) {
-            return stomp_->cancel();
+    // ==================== Task callback implementations ====================
+    
+    bool taskGenerateNoisyParameters(const MatrixXd& parameters,
+                                     std::size_t num_timesteps,
+                                     int iteration_number,
+                                     MatrixXd& parameters_noise,
+                                     MatrixXd& noise) 
+    {
+        float decayed_stddev = noise_stddev_ * std::pow(noise_decay_, iteration_number);
+        std::normal_distribution<double> dist(0.0, decayed_stddev);
+        
+        noise.resize(parameters.rows(), parameters.cols());
+        parameters_noise.resize(parameters.rows(), parameters.cols());
+        
+        for (int d = 0; d < parameters.rows(); ++d) {
+            for (int t = 0; t < parameters.cols(); ++t) {
+                if (t == 0 || t == parameters.cols() - 1) {
+                    noise(d, t) = 0.0;
+                } else {
+                    noise(d, t) = dist(rng_);
+                }
+            }
         }
-        return false;
+        
+        parameters_noise = parameters + noise;
+        return true;
     }
     
-    /**
-     * @brief Reset the planner
-     */
-    void reset() {
-        if (stomp_) {
-            stomp_->clear();
+    bool taskComputeCosts(const MatrixXd& parameters,
+                          std::size_t num_timesteps,
+                          VectorXd& costs,
+                          bool& validity) 
+    {
+        costs.resize(num_timesteps);
+        costs.setZero();
+        
+        if (collision_task_) {
+            const auto& obs = collision_task_->getObstacleSoA();
+            if (!obs.empty()) {
+                const float epsilon = collision_task_->getConfig().epsilon_sdf;
+                const float sigma = collision_task_->getConfig().sigma_obs;
+                
+                for (size_t t = 1; t < num_timesteps - 1; ++t) {
+                    VectorXf pos(parameters.rows());
+                    for (int d = 0; d < parameters.rows(); ++d) {
+                        pos(d) = static_cast<float>(parameters(d, t));
+                    }
+                    
+                    Eigen::MatrixXf diff = obs.centers.colwise() - pos;
+                    Eigen::VectorXf distances = diff.colwise().norm();
+                    Eigen::VectorXf sdfs = distances - obs.combined_radii;
+                    Eigen::VectorXf hinges = (epsilon - sdfs.array()).max(0.0f);
+                    costs(t) = sigma * hinges.squaredNorm();
+                }
+            }
         }
-        initializeTrajectory();
-        trajectory_history_.clear();
-        if (stomp_task_ptr_) {
-            stomp_task_ptr_->clearHistory();
+        
+        validity = (costs.sum() < 1e-3);
+        return true;
+    }
+    
+    bool taskFilterUpdates(MatrixXd& updates) {
+        updates.col(0).setZero();
+        updates.col(updates.cols() - 1).setZero();
+        return true;
+    }
+    
+    void taskPostIteration(int iteration_number, double cost, const MatrixXd& parameters) {
+        current_iteration_ = iteration_number;
+        
+        Trajectory traj = matrixToTrajectory(parameters);
+        iteration_trajectories_.push_back(traj);
+        
+        if (iteration_number % 10 == 0) {
+            std::cout << "  STOMP Iteration " << iteration_number << ": cost = " << cost << "\n";
         }
     }
     
-    // Accessors
+    void taskDone(bool success, int total_iterations, double final_cost) {
+        std::cout << "STOMP " << (success ? "succeeded" : "failed")
+                  << " after " << total_iterations << " iterations"
+                  << " with cost " << final_cost << "\n";
+        converged_ = success;
+        final_cost_ = static_cast<float>(final_cost);
+    }
+    
+    // ==================== Accessors ====================
+    
     const Trajectory& getCurrentTrajectory() const { return current_trajectory_; }
-    const std::vector<Trajectory>& getTrajectoryHistory() const { return trajectory_history_; }
+    const std::vector<Trajectory>& getTrajectoryHistory() const { return iteration_trajectories_; }
     bool isInitialized() const { return initialized_; }
     
-    /**
-     * @brief Compute smoothness cost for a trajectory
-     */
     float computeSmoothnessCost(const Trajectory& trajectory) const {
         if (trajectory.nodes.size() < 3) return 0.0f;
         
         float cost = 0.0f;
         for (size_t i = 1; i < trajectory.nodes.size() - 1; ++i) {
-            // Compute acceleration (second derivative)
             VectorXf acc = trajectory.nodes[i+1].position 
                          - 2.0f * trajectory.nodes[i].position 
                          + trajectory.nodes[i-1].position;
@@ -255,7 +252,6 @@ public:
 
 private:
     void initializeTrajectory() {
-        // Create linear interpolation from start to goal
         current_trajectory_.nodes.resize(config_.num_timesteps);
         
         VectorXf start(config_.num_dimensions);
@@ -288,15 +284,117 @@ private:
         return traj;
     }
     
+    // Core references
     std::shared_ptr<CollisionAvoidanceTask> collision_task_;
-    std::shared_ptr<StompCollisionTask> stomp_task_ptr_;  // Shared ptr for STOMP
-    stomp::Stomp* stomp_;                                  // Raw pointer to avoid ABI issues
+    std::shared_ptr<StompCollisionTask> stomp_task_;
+    stomp::Stomp* stomp_;
     
+    // Configuration
     StompPlannerConfig config_;
-    Trajectory current_trajectory_;
-    std::vector<Trajectory> trajectory_history_;
     
+    // Optimization state
+    float noise_stddev_;
+    float noise_decay_;
+    std::mt19937 rng_;
+    int current_iteration_;
+    
+    // Results
+    Trajectory current_trajectory_;
+    std::vector<Trajectory> iteration_trajectories_;
+    float final_cost_;
+    bool converged_;
     bool initialized_;
 };
+
+// ==================== StompCollisionTask method implementations ====================
+
+inline bool StompCollisionTask::generateNoisyParameters(
+    const MatrixXd& parameters,
+    std::size_t start_timestep,
+    std::size_t num_timesteps,
+    int iteration_number,
+    int rollout_number,
+    MatrixXd& parameters_noise,
+    MatrixXd& noise) 
+{
+    if (!planner_) return false;
+    return planner_->taskGenerateNoisyParameters(parameters, num_timesteps, iteration_number, 
+                                                  parameters_noise, noise);
+}
+
+inline bool StompCollisionTask::computeNoisyCosts(
+    const MatrixXd& parameters,
+    std::size_t start_timestep,
+    std::size_t num_timesteps,
+    int iteration_number,
+    int rollout_number,
+    VectorXd& costs,
+    bool& validity) 
+{
+    if (!planner_) {
+        costs = VectorXd::Zero(num_timesteps);
+        validity = true;
+        return true;
+    }
+    return planner_->taskComputeCosts(parameters, num_timesteps, costs, validity);
+}
+
+inline bool StompCollisionTask::computeCosts(
+    const MatrixXd& parameters,
+    std::size_t start_timestep,
+    std::size_t num_timesteps,
+    int iteration_number,
+    VectorXd& costs,
+    bool& validity) 
+{
+    return computeNoisyCosts(parameters, start_timestep, num_timesteps, 
+                             iteration_number, -1, costs, validity);
+}
+
+inline bool StompCollisionTask::filterNoisyParameters(
+    std::size_t start_timestep,
+    std::size_t num_timesteps,
+    int iteration_number,
+    int rollout_number,
+    MatrixXd& parameters,
+    bool& filtered) 
+{
+    filtered = false;
+    return true;
+}
+
+inline bool StompCollisionTask::filterParameterUpdates(
+    std::size_t start_timestep,
+    std::size_t num_timesteps,
+    int iteration_number,
+    const MatrixXd& parameters,
+    MatrixXd& updates) 
+{
+    if (!planner_) return true;
+    return planner_->taskFilterUpdates(updates);
+}
+
+inline void StompCollisionTask::postIteration(
+    std::size_t start_timestep,
+    std::size_t num_timesteps,
+    int iteration_number,
+    double cost,
+    const MatrixXd& parameters) 
+{
+    if (planner_) {
+        planner_->taskPostIteration(iteration_number, cost, parameters);
+    }
+}
+
+inline void StompCollisionTask::done(
+    bool success, 
+    int total_iterations, 
+    double final_cost,
+    const MatrixXd& parameters) 
+{
+    if (planner_) {
+        planner_->taskDone(success, total_iterations, final_cost);
+    }
+}
 
 } // namespace pce
