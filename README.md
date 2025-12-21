@@ -327,5 +327,5 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 - **STOMP**: Stochastic Trajectory Optimization for Motion Planning ([Kalakrishnan et al., 2011](https://ieeexplore.ieee.org/document/5980280))
 - **CHOMP**: Covariant Hamiltonian Optimization for Motion Planning ([Ratliff et al., 2009](https://journals.sagepub.com/doi/10.1177/0278364913488805))
-- **GPMP**: Gaussian Process Motion Planning ([Mukadam et al., 2018](https://journals.sagepub.com/doi/10.1177/0278364918802969))
-- **GVIMP**: Gaussian Variational Inference Motion Planning ([Yu et al., 2023](https://ieeexplore.ieee.org/document/10160723))
+- **GPMP**: Gaussian Process Motion Planning ([Mukadam et al., 2018](https://journals.sagepub.com/doi/full/10.1177/0278364918790369?casa_token=M8AZHNAPmmgAAAAA%3AjJ5_Jc4Kta8W-ughIQNyxy7zzaEu8a7CVNEWocGyKpRQfSZ8NN7RrLQakIgBxtWYeH2BjvcrJoSe))
+- **GVIMP**: Gaussian Variational Inference Motion Planning ([Yu et al., 2023](https://ieeexplore.ieee.org/abstract/document/10068240))
