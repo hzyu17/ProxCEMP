@@ -4,12 +4,20 @@ project(PCEMotionPlanner VERSION 1.0.0 LANGUAGES CXX)
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(BUILD_SHARED_LIBS OFF)
+
+# For Debugging
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -g")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+
+
+add_subdirectory(external/stomp)
+add_subdirectory(Examples2d3d)
 
 # Find dependencies
 find_package(Eigen3 REQUIRED)
 find_package(CASADI REQUIRED)
 find_package(OpenMP REQUIRED)
-find_package(stomp REQUIRED)
 
 # Include Casadi headers
 include_directories(${CASADI_INCLUDE_DIRS})
@@ -25,7 +33,7 @@ target_include_directories(pce_motion_planner INTERFACE
 )
 
 # Link Eigen3
-target_link_libraries(pce_motion_planner INTERFACE Eigen3::Eigen ${CASADI_LIBRARIES} OpenMP::OpenMP_CXX)
+target_link_libraries(pce_motion_planner INTERFACE Eigen3::Eigen ${CASADI_LIBRARIES} OpenMP::OpenMP_CXX stomp)
 
 # Installation rules
 include(GNUInstallDirs)

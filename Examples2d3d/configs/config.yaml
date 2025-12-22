@@ -99,30 +99,21 @@ pce_planner:
 
 
 stomp:
-  # Core STOMP parameters
-  num_iterations: 100           # Maximum number of optimization iterations
-  num_rollouts: 10              # Number of noisy trajectories per iteration
-  max_rollouts: 20              # Maximum rollouts to keep (must be > num_rollouts)
-  num_iterations_after_valid: 5 # Continue iterations after finding valid solution
+  # Increase exploration
+  num_iterations: 50           # More iterations
+  num_rollouts: 100              # More samples per iteration
+  max_rollouts: 10
+  num_iterations_after_valid: 10
   
-  # Time discretization
-  delta_t: 0.1                  # Time step between waypoints (seconds)
+  # Adjust noise for 800x600 workspace
+  noise_stddev: 50.0            # ~5-10% of workspace diagonal
+  noise_decay: 0.98             # Slower decay
   
-  # Cost weights
-  control_cost_weight: 0.0      # Weight for control (acceleration) cost
-                                # Set to 0 to focus on collision avoidance only
-                                # Increase (e.g., 0.1-1.0) for smoother trajectories
+  # Balance exploration/exploitation
+  exponentiated_cost_sensitivity: 5.0   # More exploration (was 10)
   
-  # Probability computation
-  exponentiated_cost_sensitivity: 10.0  # h parameter in exp(-h * cost)
-                                         # Higher = more greedy selection
-                                         # Lower = more exploration
+  # Add some smoothness
+  control_cost_weight: 10.0     # Small smoothness weight
   
-  # Noise generation
-  noise_stddev: 20.0            # Initial noise standard deviation
-  noise_decay: 0.95             # Noise decay factor per iteration
-                                # noise(iter) = noise_stddev * decay^iter
-  
-  # Convergence
-  cost_tolerance: 1e-4          # Convergence tolerance for cost improvement
-
+  # Time step
+  delta_t: 0.02                 # 10.0 total_time / 500 nodes = 0.02

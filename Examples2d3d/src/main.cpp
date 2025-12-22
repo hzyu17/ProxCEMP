@@ -13,59 +13,59 @@
 
 int main() {
 
-    // {
-    //     std::cout << "\n========================================\n";
-    //     std::cout << "EARLY STOMP TEST (before any other code)\n";
-    //     std::cout << "========================================\n";
+    {
+        std::cout << "\n========================================\n";
+        std::cout << "EARLY STOMP TEST (before any other code)\n";
+        std::cout << "========================================\n";
         
-    //     // Size checks
-    //     std::cout << "Size checks:\n";
-    //     std::cout << "  sizeof(stomp::StompConfiguration): " << sizeof(stomp::StompConfiguration) << "\n";
-    //     std::cout << "  sizeof(std::shared_ptr<stomp::Task>): " << sizeof(std::shared_ptr<stomp::Task>) << "\n";
+        // Size checks
+        std::cout << "Size checks:\n";
+        std::cout << "  sizeof(stomp::StompConfiguration): " << sizeof(stomp::StompConfiguration) << "\n";
+        std::cout << "  sizeof(std::shared_ptr<stomp::Task>): " << sizeof(std::shared_ptr<stomp::Task>) << "\n";
         
-    //     // Create minimal config
-    //     stomp::StompConfiguration cfg;
-    //     cfg.num_timesteps = 20;
-    //     cfg.num_iterations = 5;
-    //     cfg.num_dimensions = 2;
-    //     cfg.num_rollouts = 3;
-    //     cfg.max_rollouts = 5;
-    //     cfg.num_iterations_after_valid = 0;
-    //     cfg.delta_t = 0.1;
-    //     cfg.control_cost_weight = 0.0;
-    //     cfg.exponentiated_cost_sensitivity = 10.0;
-    //     cfg.initialization_method = stomp::TrajectoryInitializations::LINEAR_INTERPOLATION;
+        // Create minimal config
+        stomp::StompConfiguration cfg;
+        cfg.num_timesteps = 20;
+        cfg.num_iterations = 5;
+        cfg.num_dimensions = 2;
+        cfg.num_rollouts = 3;
+        cfg.max_rollouts = 5;
+        cfg.num_iterations_after_valid = 0;
+        cfg.delta_t = 0.1;
+        cfg.control_cost_weight = 0.0;
+        cfg.exponentiated_cost_sensitivity = 10.0;
+        cfg.initialization_method = stomp::TrajectoryInitializations::LINEAR_INTERPOLATION;
         
-    //     // Create our task
-    //     auto early_task = std::make_shared<pce::StompCollisionTask>();
-    //     std::cout << "Task created, size=" << sizeof(pce::StompCollisionTask) << "\n";
+        // Create our task
+        auto early_task = std::make_shared<pce::StompCollisionTask>();
+        std::cout << "Task created, size=" << sizeof(pce::StompCollisionTask) << "\n";
         
-    //     // Create STOMP
-    //     std::cout << "Creating STOMP in early test...\n";
-    //     stomp::Stomp* early_stomp = nullptr;
-    //     try {
-    //         early_stomp = new stomp::Stomp(cfg, early_task);
-    //         std::cout << "EARLY TEST: STOMP created successfully!\n";
+        // Create STOMP
+        std::cout << "Creating STOMP in early test...\n";
+        stomp::Stomp* early_stomp = nullptr;
+        try {
+            early_stomp = new stomp::Stomp(cfg, early_task);
+            std::cout << "EARLY TEST: STOMP created successfully!\n";
             
-    //         // Quick solve test
-    //         Eigen::VectorXd start(2), goal(2);
-    //         start << 0.0, 0.0;
-    //         goal << 100.0, 100.0;
-    //         Eigen::MatrixXd result;
-    //         bool success = early_stomp->solve(start, goal, result);
-    //         std::cout << "EARLY TEST: solve() " << (success ? "SUCCESS" : "FAILED") << "\n";
+            // Quick solve test
+            Eigen::VectorXd start(2), goal(2);
+            start << 0.0, 0.0;
+            goal << 100.0, 100.0;
+            Eigen::MatrixXd result;
+            bool success = early_stomp->solve(start, goal, result);
+            std::cout << "EARLY TEST: solve() " << (success ? "SUCCESS" : "FAILED") << "\n";
             
-    //         delete early_stomp;
-    //         std::cout << "EARLY TEST: Cleanup successful\n";
-    //     } catch (const std::exception& e) {
-    //         std::cerr << "EARLY TEST FAILED: " << e.what() << "\n";
-    //         return 1;
-    //     }
+            delete early_stomp;
+            std::cout << "EARLY TEST: Cleanup successful\n";
+        } catch (const std::exception& e) {
+            std::cerr << "EARLY TEST FAILED: " << e.what() << "\n";
+            return 1;
+        }
         
-    //     std::cout << "========================================\n";
-    //     std::cout << "EARLY TEST PASSED - continuing with program\n";
-    //     std::cout << "========================================\n\n";
-    // }
+        std::cout << "========================================\n";
+        std::cout << "EARLY TEST PASSED - continuing with program\n";
+        std::cout << "========================================\n\n";
+    }
 
     std::cout << "=================================================\n";
     std::cout << "   Motion Planning Experiments\n";
@@ -214,106 +214,106 @@ int main() {
         std::cout << "\n✗ NGD optimization failed\n";
     }
 
-    // // =========================================================================
-    // // STOMP PLANNER (NEW)
-    // // =========================================================================
-    // std::cout << "\n=== STOMP Planner ===\n";
+    // =========================================================================
+    // STOMP PLANNER (NEW)
+    // =========================================================================
+    std::cout << "\n=== STOMP Planner ===\n";
 
-    // auto task_stomp = std::make_shared<pce::CollisionAvoidanceTask>(config);
-    // auto planner_stomp = std::make_shared<pce::StompMotionPlanner>(task_stomp);
+    auto task_stomp = std::make_shared<pce::CollisionAvoidanceTask>(config);
+    auto planner_stomp = std::make_shared<pce::StompMotionPlanner>(task_stomp);
 
-    // pce::StompPlannerConfig stomp_config;
-    // bool stomp_config_loaded = stomp_config.loadFromFile(config_file);
+    pce::StompPlannerConfig stomp_config;
+    bool stomp_config_loaded = stomp_config.loadFromFile(config_file);
     
-    // if (!stomp_config_loaded) {
-    //     std::cerr << "Failed to load STOMP configuration, setting defaults manually...\n";
+    if (!stomp_config_loaded) {
+        std::cerr << "Failed to load STOMP configuration, setting defaults manually...\n";
         
-    //     // Set defaults from motion_planning section
-    //     if (const auto& mp = config["motion_planning"]) {
-    //         stomp_config.num_timesteps = mp["num_nodes"].as<size_t>(50);
-    //         stomp_config.num_dimensions = mp["num_dimensions"].as<size_t>(2);
-    //         if (mp["start_position"]) {
-    //             stomp_config.start_position = mp["start_position"].as<std::vector<float>>();
-    //         }
-    //         if (mp["goal_position"]) {
-    //             stomp_config.goal_position = mp["goal_position"].as<std::vector<float>>();
-    //         }
-    //     }
+        // Set defaults from motion_planning section
+        if (const auto& mp = config["motion_planning"]) {
+            stomp_config.num_timesteps = mp["num_nodes"].as<size_t>(50);
+            stomp_config.num_dimensions = mp["num_dimensions"].as<size_t>(2);
+            if (mp["start_position"]) {
+                stomp_config.start_position = mp["start_position"].as<std::vector<float>>();
+            }
+            if (mp["goal_position"]) {
+                stomp_config.goal_position = mp["goal_position"].as<std::vector<float>>();
+            }
+        }
         
-    //     // Verify we have valid start/goal
-    //     if (stomp_config.start_position.empty() || stomp_config.goal_position.empty()) {
-    //         std::cerr << "Error: Could not determine start/goal positions for STOMP\n";
-    //         std::cerr << "Skipping STOMP planner...\n";
-    //         // We'll handle this by checking initialized_ later
-    //     }
-    // }
+        // Verify we have valid start/goal
+        if (stomp_config.start_position.empty() || stomp_config.goal_position.empty()) {
+            std::cerr << "Error: Could not determine start/goal positions for STOMP\n";
+            std::cerr << "Skipping STOMP planner...\n";
+            // We'll handle this by checking initialized_ later
+        }
+    }
     
-    // // Print config for debugging
-    // std::cout << "STOMP Config:\n"
-    //           << "  num_dimensions: " << stomp_config.num_dimensions << "\n"
-    //           << "  num_timesteps: " << stomp_config.num_timesteps << "\n"
-    //           << "  start_position size: " << stomp_config.start_position.size() << "\n"
-    //           << "  goal_position size: " << stomp_config.goal_position.size() << "\n";
+    // Print config for debugging
+    std::cout << "STOMP Config:\n"
+              << "  num_dimensions: " << stomp_config.num_dimensions << "\n"
+              << "  num_timesteps: " << stomp_config.num_timesteps << "\n"
+              << "  start_position size: " << stomp_config.start_position.size() << "\n"
+              << "  goal_position size: " << stomp_config.goal_position.size() << "\n";
 
-    // std::cout << "\n=== Initializing STOMP Planner ===\n";
-    // bool stomp_initialized = planner_stomp->initialize(stomp_config);
+    std::cout << "\n=== Initializing STOMP Planner ===\n";
+    bool stomp_initialized = planner_stomp->initialize(stomp_config);
     
-    // if (!stomp_initialized) {
-    //     std::cerr << "Error: STOMP Planner initialization failed\n";
-    //     // Continue with other planners instead of returning
-    // }
+    if (!stomp_initialized) {
+        std::cerr << "Error: STOMP Planner initialization failed\n";
+        // Continue with other planners instead of returning
+    }
 
-    // if (stomp_initialized && visualize) {
-    //     std::cout << "Showing STOMP initial state visualization...\n";
-    //     visualizeInitialState(task_stomp->getObstacles(),
-    //                         planner_stomp->getCurrentTrajectory(),
-    //                         "STOMP - Initial State");
-    // }
+    if (stomp_initialized && visualize) {
+        std::cout << "Showing STOMP initial state visualization...\n";
+        visualizeInitialState(task_stomp->getObstacles(),
+                            planner_stomp->getCurrentTrajectory(),
+                            "STOMP - Initial State");
+    }
 
-    // // Collect STOMP history
-    // OptimizationHistory stomp_history;
-    // stomp_history.clear();
-    // bool success_stomp = false;
+    // Collect STOMP history
+    OptimizationHistory stomp_history;
+    stomp_history.clear();
+    bool success_stomp = false;
 
-    // if (stomp_initialized) {
-    //     // Store initial state
-    //     {
-    //         IterationData init_data;
-    //         init_data.iteration = 0;
-    //         init_data.mean_trajectory = planner_stomp->getCurrentTrajectory();
-    //         init_data.total_cost = task_stomp->computeStateCost(init_data.mean_trajectory);
-    //         init_data.collision_cost = init_data.total_cost;
-    //         init_data.smoothness_cost = 0.0f;
-    //         stomp_history.addIteration(init_data);
-    //     }
+    if (stomp_initialized) {
+        // Store initial state
+        {
+            IterationData init_data;
+            init_data.iteration = 0;
+            init_data.mean_trajectory = planner_stomp->getCurrentTrajectory();
+            init_data.total_cost = task_stomp->computeStateCost(init_data.mean_trajectory);
+            init_data.collision_cost = init_data.total_cost;
+            init_data.smoothness_cost = 0.0f;
+            stomp_history.addIteration(init_data);
+        }
 
-    //     std::cout << "\n=== Running STOMP Optimization ===\n";
-    //     success_stomp = planner_stomp->solve();
+        std::cout << "\n=== Running STOMP Optimization ===\n";
+        success_stomp = planner_stomp->solve();
 
-    //     auto traj_history_stomp = planner_stomp->getTrajectoryHistory();
-    //     for (size_t i = 0; i < traj_history_stomp.size(); ++i) {
-    //         IterationData iter_data;
-    //         iter_data.iteration = i;
-    //         iter_data.mean_trajectory = traj_history_stomp[i];
-    //         iter_data.total_cost = task_stomp->computeStateCost(traj_history_stomp[i]);
-    //         iter_data.collision_cost = iter_data.total_cost;
-    //         iter_data.smoothness_cost = 0.0f;
-    //         stomp_history.addIteration(iter_data);
-    //     }
+        auto traj_history_stomp = planner_stomp->getTrajectoryHistory();
+        for (size_t i = 0; i < traj_history_stomp.size(); ++i) {
+            IterationData iter_data;
+            iter_data.iteration = i;
+            iter_data.mean_trajectory = traj_history_stomp[i];
+            iter_data.total_cost = task_stomp->computeStateCost(traj_history_stomp[i]);
+            iter_data.collision_cost = iter_data.total_cost;
+            iter_data.smoothness_cost = 0.0f;
+            stomp_history.addIteration(iter_data);
+        }
 
-    //     stomp_history.final_trajectory = planner_stomp->getCurrentTrajectory();
-    //     stomp_history.final_cost = task_stomp->computeStateCost(stomp_history.final_trajectory);
-    //     stomp_history.converged = success_stomp;
-    //     stomp_history.total_iterations = traj_history_stomp.size();
+        stomp_history.final_trajectory = planner_stomp->getCurrentTrajectory();
+        stomp_history.final_cost = task_stomp->computeStateCost(stomp_history.final_trajectory);
+        stomp_history.converged = success_stomp;
+        stomp_history.total_iterations = traj_history_stomp.size();
 
-    //     if (success_stomp) {
-    //         std::cout << "\n✓ STOMP optimization completed successfully\n";
-    //     } else {
-    //         std::cout << "\n✗ STOMP optimization failed\n";
-    //     }
-    // } else {
-    //     std::cout << "\n✗ STOMP skipped due to initialization failure\n";
-    // }
+        if (success_stomp) {
+            std::cout << "\n✓ STOMP optimization completed successfully\n";
+        } else {
+            std::cout << "\n✗ STOMP optimization failed\n";
+        }
+    } else {
+        std::cout << "\n✗ STOMP skipped due to initialization failure\n";
+    }
 
     // // =========================================================================
     // // CASADI PLANNERS - ALL SOLVERS
@@ -437,15 +437,15 @@ int main() {
     std::cout << "\nDisplaying NGD cost convergence...\n";
     visualizer.showCostPlot(ngd_history, "NGD - Cost Convergence");
 
-    // // Show STOMP trajectory evolution (NEW)
-    // if (stomp_initialized) {
-    //     std::cout << "\nDisplaying STOMP trajectory evolution...\n";
-    //     visualizer.showTrajectoryEvolution(*obstacle_map_ptr, stomp_history, "STOMP - Trajectory Evolution");
+    // Show STOMP trajectory evolution (NEW)
+    if (stomp_initialized) {
+        std::cout << "\nDisplaying STOMP trajectory evolution...\n";
+        visualizer.showTrajectoryEvolution(*obstacle_map_ptr, stomp_history, "STOMP - Trajectory Evolution");
 
-    //     // Show STOMP cost convergence (NEW)
-    //     std::cout << "\nDisplaying STOMP cost convergence...\n";
-    //     visualizer.showCostPlot(stomp_history, "STOMP - Cost Convergence");
-    // }
+        // Show STOMP cost convergence (NEW)
+        std::cout << "\nDisplaying STOMP cost convergence...\n";
+        visualizer.showCostPlot(stomp_history, "STOMP - Cost Convergence");
+    }
 
     // // Show all CasADi solver results
     // for (const auto& solver_name : casadi_solvers) {
@@ -478,11 +478,11 @@ int main() {
     auto pce_final_res = evaluate_final(planner_pce->getCurrentTrajectory());
     auto ngd_final_res = evaluate_final(planner_ngd->getCurrentTrajectory());
     
-    // // STOMP results (only if initialized)
-    // std::pair<float, float> stomp_final_res = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-    // if (stomp_initialized) {
-    //     stomp_final_res = evaluate_final(planner_stomp->getCurrentTrajectory());
-    // }
+    // STOMP results (only if initialized)
+    std::pair<float, float> stomp_final_res = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    if (stomp_initialized) {
+        stomp_final_res = evaluate_final(planner_stomp->getCurrentTrajectory());
+    }
 
     std::cout << std::left << std::setw(18) << "Planner" 
               << std::setw(12) << "Status" 
@@ -503,20 +503,20 @@ int main() {
               << std::setw(15) << ngd_final_res.first
               << ngd_final_res.second << "\n";
 
-    // // NEW: STOMP results
-    // if (stomp_initialized) {
-    //     std::cout << std::left << std::setw(18) << "STOMP" 
-    //               << std::setw(12) << (success_stomp ? "SUCCESS" : "FAILED")
-    //               << std::setw(10) << stomp_history.total_iterations
-    //               << std::setw(15) << stomp_final_res.first
-    //               << stomp_final_res.second << "\n";
-    // } else {
-    //     std::cout << std::left << std::setw(18) << "STOMP" 
-    //               << std::setw(12) << "SKIPPED"
-    //               << std::setw(10) << "-"
-    //               << std::setw(15) << "-"
-    //               << "-\n";
-    // }
+    // NEW: STOMP results
+    if (stomp_initialized) {
+        std::cout << std::left << std::setw(18) << "STOMP" 
+                  << std::setw(12) << (success_stomp ? "SUCCESS" : "FAILED")
+                  << std::setw(10) << stomp_history.total_iterations
+                  << std::setw(15) << stomp_final_res.first
+                  << stomp_final_res.second << "\n";
+    } else {
+        std::cout << std::left << std::setw(18) << "STOMP" 
+                  << std::setw(12) << "SKIPPED"
+                  << std::setw(10) << "-"
+                  << std::setw(15) << "-"
+                  << "-\n";
+    }
 
     // // Print all CasADi solver results
     // for (const auto& solver_name : casadi_solvers) {
@@ -545,11 +545,11 @@ int main() {
         best_planner = "NGD";
     }
     
-    // // NEW: Include STOMP in comparison (only if initialized and successful)
-    // if (stomp_initialized && stomp_final_res.first < best_cost && !std::isnan(stomp_final_res.first)) {
-    //     best_cost = stomp_final_res.first;
-    //     best_planner = "STOMP";
-    // }
+    // NEW: Include STOMP in comparison (only if initialized and successful)
+    if (stomp_initialized && stomp_final_res.first < best_cost && !std::isnan(stomp_final_res.first)) {
+        best_cost = stomp_final_res.first;
+        best_planner = "STOMP";
+    }
     
     // for (const auto& solver_name : casadi_solvers) {
     //     if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;

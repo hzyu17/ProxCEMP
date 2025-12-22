@@ -49,7 +49,7 @@ struct StompPlannerConfig {
             
             // Load motion planning parameters first (these are required)
             if (const auto& mp = config["motion_planning"]) {
-                num_timesteps = mp["num_nodes"].as<size_t>(num_timesteps);
+                num_timesteps = mp["num_discretization"].as<size_t>(num_timesteps);
                 num_dimensions = mp["num_dimensions"].as<size_t>(num_dimensions);
                 
                 if (mp["start_position"]) {

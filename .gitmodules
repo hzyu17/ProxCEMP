@@ -1,0 +1,3 @@
+[submodule "external/stomp"]
+	path = external/stomp
+	url = https://github.com/ros-industrial/stomp.git
