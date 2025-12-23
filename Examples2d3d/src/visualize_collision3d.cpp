@@ -675,7 +675,7 @@ int main() {
     // Load config
     std::filesystem::path source_path(__FILE__);
     std::filesystem::path source_dir = source_path.parent_path();
-    std::filesystem::path config_path = source_dir / "../configs/config_3d.yaml";
+    std::filesystem::path config_path = source_dir / "../Examples2d3d/configs/config_3d.yaml"; // Running from the root directory of the project
     
     std::string config_file;
     try {

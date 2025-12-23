@@ -161,14 +161,6 @@ The library includes three visualization tools for 2D planning scenarios:
 </p>
 
 <p align="center">
-  <img src="Examples2d3d/figures/noise_trj3d.png" width="400" alt="3D Trajectory Samples">
-  <img src="Examples2d3d/figures/collision3d.png" width="400" alt="3D Collision Visualization">
-</p>
-<p align="center">
-  <em>3D trajectory visualization with interactive rotation and lighting.</em>
-</p>
-
-<p align="center">
   <img src="Examples2d3d/figures/pce_optimization_cost_convergence.png" width="400" alt="PCE Cost Convergence">
   <img src="Examples2d3d/figures/ngd_optimization_cost_convergence.png" width="400" alt="NGD Cost Convergence">
 </p>
@@ -182,6 +174,22 @@ The library includes three visualization tools for 2D planning scenarios:
 </p>
 <p align="center">
   <em>Optimization progression: PCE (left) vs NGD (right).</em>
+</p>
+
+<p align="center">
+  <img src="Examples2d3d/figures/noise_trj3d.png" width="400" alt="3D Trajectory Samples">
+  <img src="Examples2d3d/figures/collision3d.png" width="400" alt="3D Collision Visualization">
+</p>
+<p align="center">
+  <em>3D trajectory visualization with interactive rotation and lighting.</em>
+</p>
+
+<p align="center">
+  <img src="Examples2d3d/figures/pce_anim3d.gif" width="400" alt="PCE Optimization">
+  <img src="Examples2d3d/figures/ngd_anim3d.gif" width="400" alt="NGD Optimization">
+</p>
+<p align="center">
+  <em>Optimization progression 3D: PCE (left) vs NGD (right).</em>
 </p>
 
 ### ROS Integration

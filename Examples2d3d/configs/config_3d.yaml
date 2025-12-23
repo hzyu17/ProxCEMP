@@ -115,24 +115,21 @@ pce_planner:
   temperature_final: 0.05
 
 stomp:
-  # Core STOMP parameters
-  num_iterations: 150             # Increased for 3D
-  num_rollouts: 15                # More rollouts for 3D exploration
-  max_rollouts: 30                # Must be > num_rollouts
-  num_iterations_after_valid: 5
+  # Increase exploration
+  num_iterations: 50           # More iterations
+  num_rollouts: 100              # More samples per iteration
+  max_rollouts: 10
+  num_iterations_after_valid: 10
   
-  # Time discretization
-  delta_t: 0.1
+  # Adjust noise for 800x600 workspace
+  noise_stddev: 50.0            # ~5-10% of workspace diagonal
+  noise_decay: 0.98             # Slower decay
   
-  # Cost weights
-  control_cost_weight: 0.0
+  # Balance exploration/exploitation
+  exponentiated_cost_sensitivity: 5.0   # More exploration (was 10)
   
-  # Probability computation
-  exponentiated_cost_sensitivity: 10.0
+  # Add some smoothness
+  control_cost_weight: 10.0     # Small smoothness weight
   
-  # Noise generation - slightly higher for 3D
-  noise_stddev: 25.0              # Increased for 3D exploration
-  noise_decay: 0.95
-  
-  # Convergence
-  cost_tolerance: 1e-4
+  # Time step
+  delta_t: 0.02                 # 10.0 total_time / 500 nodes = 0.02

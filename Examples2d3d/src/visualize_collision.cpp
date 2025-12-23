@@ -16,7 +16,7 @@ namespace {
 
 int main() {
     // --- 1. Load Configuration ---
-    std::string config_file = "../configs/config.yaml";
+    std::string config_file = "../Examples2d3d/configs/config.yaml"; // Running from the root build directory
     YAML::Node config;
     
     std::cout << "=== Load from YAML ===\n\n";

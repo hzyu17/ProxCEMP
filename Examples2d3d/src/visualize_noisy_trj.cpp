@@ -465,7 +465,7 @@ int main() {
               << "========================================\n\n";
 
     // --- Load Configuration ---
-    const std::string config_file = "../configs/config.yaml";
+    const std::string config_file = "../Examples2d3d/configs/config.yaml";
     YAML::Node config;
     
     std::cout << "=== Load from YAML ===\n\n";

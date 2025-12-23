@@ -1016,7 +1016,7 @@ int main() {
     // Use source file location to find config (same as main.cpp)
     std::filesystem::path source_path(__FILE__);
     std::filesystem::path source_dir = source_path.parent_path();
-    std::filesystem::path config_path = source_dir / "../configs/config_3d.yaml";
+    std::filesystem::path config_path = source_dir / "../Examples2d3d/configs/config_3d.yaml";
     
     std::string config_file;
     try {

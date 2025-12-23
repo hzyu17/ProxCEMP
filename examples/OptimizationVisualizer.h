@@ -9,18 +9,24 @@
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
+#include <limits>
 #include "IterationData.h"
 #include "ObstacleMap.h"
+#include "visualization_base.h"    // Reuse basic 2D drawing functions
+#include "visualization3d_base.h"  // Reuse 3D drawing primitives
 
 /**
  * @brief Publication-quality visualization for optimization results
  * 
  * Designed for tier-1 robotics journal submissions (IEEE Transactions on Robotics,
- * Robotics and Automation Letters, pedestrian safety, pedestrian safety, etc.)
+ * Robotics and Automation Letters, etc.)
  * 
- * Supports both 2D and 3D trajectories:
- * - 2D: Single view with full axis labels
- * - 3D: Multi-view projection (XY, XZ, YZ planes side-by-side)
+ * This class extends the basic visualization functions from visualization_base.h
+ * with publication-quality styling including:
+ * - Thick trajectory lines for print clarity (vs thin LineStrip in visualization_base.h)
+ * - matplotlib-compatible color palette
+ * - Axis labels, tick marks, and legends
+ * - High-resolution export options
  * 
  * Color scheme follows matplotlib default for consistency with Python plots:
  * - Current trajectory: #1f77b4 (blue)
@@ -55,7 +61,8 @@ public:
         if (!createRenderTexture(rt, STATIC_SAVE_SCALE)) return;
 
         rt.clear(sf::Color::White);
-        drawTrajectoryFigure(rt, obstacle_map, history, 0, false, false, font, font_loaded, false);
+        drawTrajectoryFigure(rt, obstacle_map, history, 0, false, false, font, font_loaded, false,
+                            window_width_, window_height_);
         rt.display();
 
         if (!rt.getTexture().copyToImage().saveToFile(filename)) {
@@ -69,8 +76,11 @@ public:
     void showTrajectoryEvolution(const ObstacleMap& obstacle_map,
                                   const OptimizationHistory& history,
                                   const std::string& title = "Trajectory Evolution") {
-        sf::RenderWindow window(sf::VideoMode({window_width_, window_height_}), title,
-                                sf::Style::Titlebar | sf::Style::Close);
+        unsigned int current_width = window_width_;
+        unsigned int current_height = window_height_;
+        
+        sf::RenderWindow window(sf::VideoMode({current_width, current_height}), title,
+                                sf::Style::Titlebar | sf::Style::Close | sf::Style::Resize);
         window.setFramerateLimit(60);
 
         sf::Font font;
@@ -89,6 +99,15 @@ public:
         while (window.isOpen()) {
             while (const auto event = window.pollEvent()) {
                 if (event->is<sf::Event::Closed>()) window.close();
+
+                // Handle window resize
+                if (const auto* resized = event->getIf<sf::Event::Resized>()) {
+                    current_width = resized->size.x;
+                    current_height = resized->size.y;
+                    sf::View view(sf::FloatRect({0.f, 0.f}, 
+                                  {static_cast<float>(current_width), static_cast<float>(current_height)}));
+                    window.setView(view);
+                }
 
                 if (const auto* key = event->getIf<sf::Event::KeyPressed>()) {
                     switch (key->code) {
@@ -127,7 +146,8 @@ public:
 
             window.clear(sf::Color::White);
             drawTrajectoryFigure(window, obstacle_map, history, current_iter,
-                                show_samples, show_all_means, font, font_loaded, true);
+                                show_samples, show_all_means, font, font_loaded, true,
+                                current_width, current_height);
             window.display();
         }
     }
@@ -137,8 +157,11 @@ public:
      */
     void showCostPlot(const OptimizationHistory& history,
                       const std::string& title = "Cost Convergence") {
-        sf::RenderWindow window(sf::VideoMode({window_width_, window_height_}), title,
-                                sf::Style::Titlebar | sf::Style::Close);
+        unsigned int current_width = window_width_;
+        unsigned int current_height = window_height_;
+        
+        sf::RenderWindow window(sf::VideoMode({current_width, current_height}), title,
+                                sf::Style::Titlebar | sf::Style::Close | sf::Style::Resize);
         window.setFramerateLimit(60);
 
         sf::Font font;
@@ -146,7 +169,6 @@ public:
 
         int save_counter = 0;
         bool show_collision = true;
-        bool show_smoothness = true;
 
         printCostControls();
 
@@ -154,17 +176,25 @@ public:
             while (const auto event = window.pollEvent()) {
                 if (event->is<sf::Event::Closed>()) window.close();
 
+                // Handle window resize
+                if (const auto* resized = event->getIf<sf::Event::Resized>()) {
+                    current_width = resized->size.x;
+                    current_height = resized->size.y;
+                    sf::View view(sf::FloatRect({0.f, 0.f}, 
+                                  {static_cast<float>(current_width), static_cast<float>(current_height)}));
+                    window.setView(view);
+                }
+
                 if (const auto* key = event->getIf<sf::Event::KeyPressed>()) {
                     switch (key->code) {
                         case sf::Keyboard::Key::Escape: window.close(); break;
                         case sf::Keyboard::Key::C: show_collision = !show_collision; break;
-                        case sf::Keyboard::Key::O: show_smoothness = !show_smoothness; break;
                         case sf::Keyboard::Key::S:
-                            saveCostImage(history, font, font_loaded, show_collision, show_smoothness,
+                            saveCostImage(history, font, font_loaded, show_collision,
                                          save_counter++, 1.0f);
                             break;
                         case sf::Keyboard::Key::P:
-                            saveCostImage(history, font, font_loaded, show_collision, show_smoothness,
+                            saveCostImage(history, font, font_loaded, show_collision,
                                          save_counter++, HIGHRES_SCALE);
                             break;
                         default: break;
@@ -173,7 +203,8 @@ public:
             }
 
             window.clear(sf::Color::White);
-            drawCostFigure(window, history, font, font_loaded, show_collision, show_smoothness, true);
+            drawCostFigure(window, history, font, font_loaded, show_collision, true,
+                          current_width, current_height);
             window.display();
         }
     }
@@ -187,41 +218,68 @@ public:
     }
 
     /**
-     * @brief Interactive 3D trajectory viewer using multi-view projections
+     * @brief Interactive 3D trajectory evolution viewer
      * 
-     * Displays XY, XZ, and YZ plane projections side-by-side.
-     * This is the preferred format for journal figures as it:
-     * - Shows exact coordinates on each axis
-     * - Avoids perspective ambiguity
-     * - Renders cleanly in print/PDF
+     * Uses primitives from visualization3d_base.h for rendering.
+     * Supports mouse rotation, keyboard navigation, and high-res export.
      */
     void showTrajectoryEvolution3D(const ObstacleMap& obstacle_map,
                                     const OptimizationHistory& history,
                                     const std::string& title = "3D Trajectory Evolution") {
-        // Use wider window for three views
+        if (history.iterations.empty()) return;
+
+        // Use wider window for 3D (initial size)
         unsigned int width_3d = window_width_ * 3 / 2;
         unsigned int height_3d = window_height_;
-        
+
         sf::RenderWindow window(sf::VideoMode({width_3d, height_3d}), title,
-                                sf::Style::Titlebar | sf::Style::Close);
+                                sf::Style::Titlebar | sf::Style::Close | sf::Style::Resize);
         window.setFramerateLimit(60);
 
         sf::Font font;
         bool font_loaded = loadFont(font);
 
+        // Compute bounds from all iterations
+        viz3d::Vec3 minB, maxB;
+        computeHistoryBounds3D(history, obstacle_map.getObstacles(), minB, maxB);
+
+        // Setup camera
+        viz3d::Camera3D cam;
+        cam.setupFromBounds(minB, maxB);
+        
+        // Zoom in and adjust view for better framing
+        cam.distance *= 0.65f;   // Zoom in (65% of default distance)
+        cam.fov = 42.0f;         // Tighter field of view
+        cam.theta = 0.6f;        // Horizontal viewing angle
+        cam.phi = 0.45f;         // Slightly elevated view
+
         int current_iter = history.iterations.size() - 1;
         bool show_samples = true;
         bool show_all_means = true;
         bool playing = false;
+        bool auto_rotate = false;
         int play_speed = 5;
         int frame_counter = 0;
         int save_counter = 0;
+
+        // Mouse state
+        bool dragging = false;
+        sf::Vector2i lastMouse;
 
         print3DControls();
 
         while (window.isOpen()) {
             while (const auto event = window.pollEvent()) {
                 if (event->is<sf::Event::Closed>()) window.close();
+
+                // Handle window resize
+                if (const auto* resized = event->getIf<sf::Event::Resized>()) {
+                    width_3d = resized->size.x;
+                    height_3d = resized->size.y;
+                    sf::View view(sf::FloatRect({0.f, 0.f}, 
+                                  {static_cast<float>(width_3d), static_cast<float>(height_3d)}));
+                    window.setView(view);
+                }
 
                 if (const auto* key = event->getIf<sf::Event::KeyPressed>()) {
                     switch (key->code) {
@@ -235,22 +293,47 @@ public:
                         case sf::Keyboard::Key::Space: playing = !playing; frame_counter = 0; break;
                         case sf::Keyboard::Key::A: show_samples = !show_samples; break;
                         case sf::Keyboard::Key::M: show_all_means = !show_all_means; break;
+                        case sf::Keyboard::Key::R: auto_rotate = !auto_rotate; break;
                         case sf::Keyboard::Key::S:
                             saveTrajectory3DImage(obstacle_map, history, current_iter,
-                                                  show_samples, show_all_means, font, font_loaded,
-                                                  save_counter++, 1.0f);
+                                                  show_samples, show_all_means, cam,
+                                                  font, font_loaded, save_counter++, 1.0f);
                             break;
                         case sf::Keyboard::Key::P:
                             saveTrajectory3DImage(obstacle_map, history, current_iter,
-                                                  show_samples, show_all_means, font, font_loaded,
-                                                  save_counter++, HIGHRES_SCALE);
+                                                  show_samples, show_all_means, cam,
+                                                  font, font_loaded, save_counter++, HIGHRES_SCALE);
                             break;
                         case sf::Keyboard::Key::G:
                             saveAnimation3DGIF(obstacle_map, history, show_samples, show_all_means,
-                                               font, font_loaded);
+                                               cam, font, font_loaded);
                             break;
                         default: break;
                     }
+                }
+
+                if (const auto* mb = event->getIf<sf::Event::MouseButtonPressed>()) {
+                    if (mb->button == sf::Mouse::Button::Left) {
+                        dragging = true;
+                        lastMouse = {mb->position.x, mb->position.y};
+                    }
+                }
+                if (event->is<sf::Event::MouseButtonReleased>()) {
+                    dragging = false;
+                }
+                if (const auto* mm = event->getIf<sf::Event::MouseMoved>()) {
+                    if (dragging) {
+                        float dx = static_cast<float>(mm->position.x - lastMouse.x);
+                        float dy = static_cast<float>(mm->position.y - lastMouse.y);
+                        cam.rotate(dx * viz3d::constants::ROTATION_SPEED,
+                                   -dy * viz3d::constants::ROTATION_SPEED);
+                        lastMouse = {mm->position.x, mm->position.y};
+                    }
+                }
+                if (const auto* scroll = event->getIf<sf::Event::MouseWheelScrolled>()) {
+                    // Proportional zoom - feels more natural
+                    float zoom_amount = cam.distance * 0.1f * scroll->delta;
+                    cam.zoom(-zoom_amount);
                 }
             }
 
@@ -259,16 +342,21 @@ public:
                 current_iter = (current_iter + 1) % history.iterations.size();
             }
 
+            if (auto_rotate) {
+                cam.rotate(viz3d::constants::AUTO_ROTATE_SPEED, 0);
+            }
+
             window.clear(sf::Color::White);
             draw3DTrajectoryFigure(window, obstacle_map, history, current_iter,
-                                   show_samples, show_all_means, font, font_loaded, true,
-                                   width_3d, height_3d);
+                                   show_samples, show_all_means, cam,
+                                   font, font_loaded, true, width_3d, height_3d,
+                                   minB, maxB);
             window.display();
         }
     }
 
     /**
-     * @brief Non-interactive batch save of 3D trajectory as multi-view projection
+     * @brief Non-interactive batch save of 3D trajectory
      */
     void saveStatic3DPlot(const ObstacleMap& obstacle_map,
                           const Trajectory& final_trajectory,
@@ -286,10 +374,22 @@ public:
         unsigned int width_3d = window_width_ * 3 / 2;
         unsigned int height_3d = window_height_;
 
+        viz3d::Vec3 minB, maxB;
+        computeHistoryBounds3D(history, obstacle_map.getObstacles(), minB, maxB);
+
+        viz3d::Camera3D cam;
+        cam.setupFromBounds(minB, maxB);
+        
+        // Zoom in and adjust view for better framing
+        cam.distance *= 0.65f;   // Zoom in (65% of default distance)
+        cam.fov = 42.0f;         // Tighter field of view
+        cam.theta = 0.6f;        // Horizontal viewing angle
+        cam.phi = 0.45f;         // Slightly elevated view
+
         sf::RenderTexture rt;
         unsigned int w = static_cast<unsigned int>(width_3d * STATIC_SAVE_SCALE);
         unsigned int h = static_cast<unsigned int>(height_3d * STATIC_SAVE_SCALE);
-        
+
         if (!rt.resize({w, h})) {
             std::cerr << "Failed to create render texture\n";
             return;
@@ -300,8 +400,9 @@ public:
         rt.setView(view);
 
         rt.clear(sf::Color::White);
-        draw3DTrajectoryFigure(rt, obstacle_map, history, 0, false, false,
-                               font, font_loaded, false, width_3d, height_3d);
+        draw3DTrajectoryFigure(rt, obstacle_map, history, 0, false, false, cam,
+                               font, font_loaded, false, width_3d, height_3d,
+                               minB, maxB);
         rt.display();
 
         if (!rt.getTexture().copyToImage().saveToFile(filename)) {
@@ -330,7 +431,7 @@ public:
         for (size_t i = 0; i < history.iterations.size(); ++i) {
             rt.clear(sf::Color::White);
             drawTrajectoryFigure(rt, obstacle_map, history, i, show_samples, show_all_means,
-                                font, font_loaded, false);
+                                font, font_loaded, false, window_width_, window_height_);
             rt.display();
 
             std::ostringstream fname;
@@ -343,16 +444,49 @@ public:
         }
 
         std::string gif_name = output_prefix_ + "_animation.gif";
-        std::ostringstream cmd;
-        cmd << "convert -delay " << (delay_ms / 10) << " -loop 0 "
-            << frame_dir << "/frame_*.png " << gif_name;
+        
+        // Try multiple methods to create GIF
+        bool success = false;
+        
+        // Method 1: ImageMagick 7+ (magick)
+        std::ostringstream cmd1;
+        cmd1 << "magick -delay " << (delay_ms / 10) << " -loop 0 "
+             << frame_dir << "/frame_*.png " << gif_name << " 2>/dev/null";
+        
+        std::cout << "Creating GIF (trying magick)...\n";
+        if (std::system(cmd1.str().c_str()) == 0) {
+            success = true;
+        } else {
+            // Method 2: ImageMagick 6 (convert)
+            std::ostringstream cmd2;
+            cmd2 << "convert -delay " << (delay_ms / 10) << " -loop 0 "
+                 << frame_dir << "/frame_*.png " << gif_name << " 2>/dev/null";
+            
+            std::cout << "Trying convert...\n";
+            if (std::system(cmd2.str().c_str()) == 0) {
+                success = true;
+            } else {
+                // Method 3: ffmpeg
+                std::ostringstream cmd3;
+                cmd3 << "ffmpeg -y -framerate " << (1000 / delay_ms) << " -i "
+                     << frame_dir << "/frame_%04d.png "
+                     << "-vf \"split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" "
+                     << gif_name << " 2>/dev/null";
+                
+                std::cout << "Trying ffmpeg...\n";
+                if (std::system(cmd3.str().c_str()) == 0) {
+                    success = true;
+                }
+            }
+        }
 
-        std::cout << "Creating GIF...\n";
-        if (std::system(cmd.str().c_str()) == 0) {
+        if (success) {
             std::cout << "Saved: " << gif_name << "\n";
             std::system(("rm -rf " + frame_dir).c_str());
         } else {
-            std::cerr << "ImageMagick failed. Install with: sudo apt install imagemagick\n"
+            std::cerr << "GIF creation failed. Install one of:\n"
+                      << "  sudo apt install imagemagick\n"
+                      << "  sudo apt install ffmpeg\n"
                       << "Frames saved in: " << frame_dir << "/\n";
         }
     }
@@ -369,6 +503,7 @@ private:
     static constexpr float GIF_SCALE = 2.0f;
 
     // === Publication Color Palette (matplotlib default) ===
+    // Note: Different from visualization_base.h colors which are designed for screen viewing
     struct Colors {
         // Trajectory colors
         static constexpr auto current()     { return sf::Color(31, 119, 180); }      // #1f77b4
@@ -393,6 +528,11 @@ private:
         static constexpr auto legendBg()    { return sf::Color(255, 255, 255, 245); }
         static constexpr auto legendBorder(){ return sf::Color(160, 160, 160); }
         static constexpr auto hint()        { return sf::Color(130, 130, 130); }
+        
+        // Collision status colors (for 3D visualization)
+        static constexpr auto safe()        { return sf::Color(100, 255, 100); }      // Bright green
+        static constexpr auto nearCollision() { return sf::Color(255, 200, 50); }     // Bright yellow-orange
+        static constexpr auto inCollision() { return sf::Color(255, 80, 80); }        // Bright red
     };
 
     // === Typography (publication-quality sizes) ===
@@ -476,33 +616,39 @@ private:
                   << "==================================\n\n";
     }
 
-    void print3DControls() {
-        std::cout << "\n=== 3D Trajectory Viewer Controls ===\n"
-                  << "Left/Right: Navigate iterations\n"
-                  << "Home/End:   Jump to first/last\n"
-                  << "Space:      Play/Pause animation\n"
-                  << "A:          Toggle samples\n"
-                  << "M:          Toggle previous means\n"
-                  << "S:          Save PNG (1x)\n"
-                  << "P:          Save PNG (4x high-res)\n"
-                  << "G:          Save GIF animation\n"
-                  << "ESC:        Exit\n"
-                  << "\nViews: XY (top-down) | XZ (front) | YZ (side)\n"
-                  << "======================================\n\n";
-    }
-
     void printCostControls() {
         std::cout << "\n=== Cost Plot Controls ===\n"
                   << "C:   Toggle collision cost\n"
-                  << "O:   Toggle smoothness cost\n"
                   << "S:   Save PNG (1x)\n"
                   << "P:   Save PNG (4x high-res)\n"
                   << "ESC: Exit\n"
                   << "==========================\n\n";
     }
 
-    void drawLine(sf::RenderTarget& target, sf::Vector2f p1, sf::Vector2f p2,
-                  float width, sf::Color color) {
+    void print3DControls() {
+        std::cout << "\n=== 3D Trajectory Viewer Controls ===\n"
+                  << "Mouse drag:  Rotate view\n"
+                  << "Scroll:      Zoom in/out\n"
+                  << "Left/Right:  Navigate iterations\n"
+                  << "Home/End:    Jump to first/last\n"
+                  << "Space:       Play/Pause animation\n"
+                  << "R:           Toggle auto-rotation\n"
+                  << "A:           Toggle samples\n"
+                  << "M:           Toggle previous means\n"
+                  << "S:           Save PNG (1x)\n"
+                  << "P:           Save PNG (4x high-res)\n"
+                  << "G:           Save GIF animation\n"
+                  << "ESC:         Exit\n"
+                  << "======================================\n\n";
+    }
+
+    // === Publication-Quality Drawing (thick lines for print) ===
+    // Note: visualization_base.h uses thin LineStrip via drawTrajectorySegments().
+    // For publication figures, thick lines (RectangleShapes) are required for print clarity.
+
+    template<typename RenderTarget>
+    void drawThickLine(RenderTarget& target, sf::Vector2f p1, sf::Vector2f p2,
+                       float width, sf::Color color) {
         sf::Vector2f d = p2 - p1;
         float len = std::sqrt(d.x * d.x + d.y * d.y);
         if (len < 0.001f) return;
@@ -515,12 +661,14 @@ private:
         target.draw(line);
     }
 
-    void drawLegendLine(sf::RenderTarget& target, float x, float y, float width,
+    template<typename RenderTarget>
+    void drawLegendLine(RenderTarget& target, float x, float y, float width,
                         sf::Color color, float lineWidth = 3.0f) {
-        drawLine(target, {x, y + 8.0f}, {x + width, y + 8.0f}, lineWidth, color);
+        drawThickLine(target, {x, y + 8.0f}, {x + width, y + 8.0f}, lineWidth, color);
     }
 
-    void drawLegendMarker(sf::RenderTarget& target, const sf::Font& font,
+    template<typename RenderTarget>
+    void drawLegendMarker(RenderTarget& target, const sf::Font& font,
                           float x, float y, const std::string& label, sf::Color color,
                           bool isSquare = false) {
         if (isSquare) {
@@ -545,7 +693,8 @@ private:
         target.draw(text);
     }
 
-    void drawLegendEntry(sf::RenderTarget& target, const sf::Font& font,
+    template<typename RenderTarget>
+    void drawLegendEntry(RenderTarget& target, const sf::Font& font,
                          float x, float y, const std::string& label, sf::Color color,
                          float lineWidth = 3.0f) {
         drawLegendLine(target, x, y, 24.0f, color, lineWidth);
@@ -565,15 +714,55 @@ private:
         return box;
     }
 
+    // === Publication-Quality Obstacle Drawing ===
+    // Note: visualization_base.h drawObstacles() uses different colors (100,100,100,180).
+    // This version uses lighter colors with borders for print clarity.
+    template<typename RenderTarget>
+    void drawObstaclesStyled(RenderTarget& target, const std::vector<ObstacleND>& obstacles,
+                             float scale, float offset_x, float offset_y) {
+        for (const auto& obs : obstacles) {
+            if (obs.dimensions() >= 2) {
+                float px = offset_x + obs.center(0) * scale;
+                float py = offset_y + obs.center(1) * scale;
+                float r = obs.radius * scale;
+                
+                sf::CircleShape circle(r);
+                circle.setPosition({px - r, py - r});
+                circle.setFillColor(Colors::obstacle());
+                circle.setOutlineColor(Colors::obstacleBorder());
+                circle.setOutlineThickness(1.5f);
+                target.draw(circle);
+            }
+        }
+    }
+
+    // === Publication-Quality Trajectory Drawing ===
+    // Note: visualization_base.h drawTrajectorySegments() uses thin LineStrip.
+    // This version uses thick rectangle lines for publication figures.
+    template<typename RenderTarget>
+    void drawThickTrajectory(RenderTarget& target, const Trajectory& trajectory,
+                             float scale, float offset_x, float offset_y,
+                             sf::Color color, float lineWidth) {
+        for (size_t i = 0; i + 1 < trajectory.nodes.size(); ++i) {
+            sf::Vector2f p1 = {offset_x + trajectory.nodes[i].position(0) * scale,
+                               offset_y + trajectory.nodes[i].position(1) * scale};
+            sf::Vector2f p2 = {offset_x + trajectory.nodes[i+1].position(0) * scale,
+                               offset_y + trajectory.nodes[i+1].position(1) * scale};
+            drawThickLine(target, p1, p2, lineWidth, color);
+        }
+    }
+
     // === Main Drawing Functions ===
 
-    void drawTrajectoryFigure(sf::RenderTarget& target,
+    template<typename RenderTarget>
+    void drawTrajectoryFigure(RenderTarget& target,
                                const ObstacleMap& obstacle_map,
                                const OptimizationHistory& history,
                                int current_iter,
                                bool show_samples, bool show_all_means,
                                const sf::Font& font, bool font_loaded,
-                               bool show_hints) {
+                               bool show_hints,
+                               unsigned int width, unsigned int height) {
         if (history.iterations.empty()) return;
 
         const auto& current = history.iterations[current_iter];
@@ -581,8 +770,8 @@ private:
         float map_h = obstacle_map.getMapHeight();
 
         // Compute plot area
-        float plot_w = window_width_ - Layout::marginLeft - Layout::marginRight;
-        float plot_h = window_height_ - Layout::marginTop - Layout::marginBottom;
+        float plot_w = width - Layout::marginLeft - Layout::marginRight;
+        float plot_h = height - Layout::marginTop - Layout::marginBottom;
         float scale = std::min(plot_w / map_w, plot_h / map_h);
         
         float plot_actual_w = map_w * scale;
@@ -598,28 +787,14 @@ private:
         target.draw(createBox(offset_x, offset_y, plot_actual_w, plot_actual_h,
                               sf::Color::White, Colors::axis(), Sizes::axisBorder));
 
-        // Obstacles
-        for (const auto& obs : obstacle_map.getObstacles()) {
-            if (obs.dimensions() >= 2) {
-                sf::Vector2f pos = transform(obs.center(0), obs.center(1));
-                float r = obs.radius * scale;
-                sf::CircleShape circle(r);
-                circle.setPosition({pos.x - r, pos.y - r});
-                circle.setFillColor(Colors::obstacle());
-                circle.setOutlineColor(Colors::obstacleBorder());
-                circle.setOutlineThickness(1.5f);
-                target.draw(circle);
-            }
-        }
+        // Obstacles (publication styling)
+        drawObstaclesStyled(target, obstacle_map.getObstacles(), scale, offset_x, offset_y);
 
         // Samples
         if (show_samples && !current.samples.empty()) {
             for (const auto& sample : current.samples) {
-                for (size_t i = 0; i + 1 < sample.nodes.size(); ++i) {
-                    sf::Vector2f p1 = transform(sample.nodes[i].position(0), sample.nodes[i].position(1));
-                    sf::Vector2f p2 = transform(sample.nodes[i+1].position(0), sample.nodes[i+1].position(1));
-                    drawLine(target, p1, p2, Sizes::sampleLine, Colors::samples());
-                }
+                drawThickTrajectory(target, sample, scale, offset_x, offset_y,
+                                   Colors::samples(), Sizes::sampleLine);
             }
         }
 
@@ -630,22 +805,15 @@ private:
                 float t = (float)i / current_iter;
                 uint8_t alpha = static_cast<uint8_t>(50 + 150 * t);
                 sf::Color col(174, 199, 232, alpha);
-                
-                for (size_t j = 0; j + 1 < traj.nodes.size(); ++j) {
-                    sf::Vector2f p1 = transform(traj.nodes[j].position(0), traj.nodes[j].position(1));
-                    sf::Vector2f p2 = transform(traj.nodes[j+1].position(0), traj.nodes[j+1].position(1));
-                    drawLine(target, p1, p2, Sizes::previousLine, col);
-                }
+                drawThickTrajectory(target, traj, scale, offset_x, offset_y,
+                                   col, Sizes::previousLine);
             }
         }
 
         // Current trajectory
         const auto& mean_traj = current.mean_trajectory;
-        for (size_t i = 0; i + 1 < mean_traj.nodes.size(); ++i) {
-            sf::Vector2f p1 = transform(mean_traj.nodes[i].position(0), mean_traj.nodes[i].position(1));
-            sf::Vector2f p2 = transform(mean_traj.nodes[i+1].position(0), mean_traj.nodes[i+1].position(1));
-            drawLine(target, p1, p2, Sizes::currentLine, Colors::current());
-        }
+        drawThickTrajectory(target, mean_traj, scale, offset_x, offset_y,
+                           Colors::current(), Sizes::currentLine);
 
         // Waypoints
         for (size_t i = 1; i + 1 < mean_traj.nodes.size(); ++i) {
@@ -684,14 +852,15 @@ private:
         if (font_loaded) {
             drawTrajectoryLabels(target, font, offset_x, offset_y, plot_actual_w, plot_actual_h,
                                  map_w, map_h, current_iter, history.iterations.size(),
-                                 current.total_cost, show_hints);
+                                 current.total_cost, show_hints, height);
         }
     }
 
-    void drawTrajectoryLabels(sf::RenderTarget& target, const sf::Font& font,
+    template<typename RenderTarget>
+    void drawTrajectoryLabels(RenderTarget& target, const sf::Font& font,
                                float offset_x, float offset_y, float plot_w, float plot_h,
                                float map_w, float map_h, int current_iter, size_t total_iters,
-                               float cost, bool show_hints) {
+                               float cost, bool show_hints, unsigned int window_h) {
         // X-axis label
         sf::Text xlabel(font, "X Position", FontSize::axisLabel);
         xlabel.setFillColor(Colors::text());
@@ -762,28 +931,29 @@ private:
         if (show_hints) {
             sf::Text hint(font, "S/P: Save PNG | G: Save GIF | Space: Play", FontSize::hint);
             hint.setFillColor(Colors::hint());
-            hint.setPosition({12.0f, window_height_ - 22.0f});
+            hint.setPosition({12.0f, window_h - 22.0f});
             target.draw(hint);
         }
     }
 
-    void drawCostFigure(sf::RenderTarget& target,
+    template<typename RenderTarget>
+    void drawCostFigure(RenderTarget& target,
                         const OptimizationHistory& history,
                         const sf::Font& font, bool font_loaded,
-                        bool show_collision, bool show_smoothness,
-                        bool show_hints) {
+                        bool show_collision,
+                        bool show_hints,
+                        unsigned int width, unsigned int height) {
         if (history.iterations.empty()) return;
 
         float plot_left = Layout::marginLeft + 10.0f;
-        float plot_right = window_width_ - Layout::marginRight;
+        float plot_right = width - Layout::marginRight;
         float plot_top = Layout::marginTop;
-        float plot_bottom = window_height_ - Layout::marginBottom;
+        float plot_bottom = height - Layout::marginBottom;
         float plot_w = plot_right - plot_left;
         float plot_h = plot_bottom - plot_top;
 
         auto costs = history.getCostHistory();
         auto collision_costs = history.getCollisionCostHistory();
-        auto smoothness_costs = history.getSmoothnessCostHistory();
 
         // Compute Y-axis range
         float max_cost = *std::max_element(costs.begin(), costs.end());
@@ -822,30 +992,28 @@ private:
                 float x2 = plot_left + (float)(i + 1) / (data.size() - 1) * plot_w;
                 float y1 = plot_bottom - (data[i] - min_cost) / range * plot_h;
                 float y2 = plot_bottom - (data[i + 1] - min_cost) / range * plot_h;
-                drawLine(target, {x1, y1}, {x2, y2}, width, color);
+                drawThickLine(target, {x1, y1}, {x2, y2}, width, color);
             }
         };
 
         bool has_collision = show_collision && 
             std::any_of(collision_costs.begin(), collision_costs.end(), [](float c) { return c > 1e-6f; });
-        bool has_smoothness = show_smoothness && 
-            std::any_of(smoothness_costs.begin(), smoothness_costs.end(), [](float c) { return c > 1e-6f; });
 
-        if (has_smoothness) drawCurve(smoothness_costs, Colors::smoothness(), Sizes::costLineSecondary);
         if (has_collision) drawCurve(collision_costs, Colors::collision(), Sizes::costLineSecondary);
         drawCurve(costs, Colors::total(), Sizes::costLine);
 
         if (font_loaded) {
             drawCostLabels(target, font, plot_left, plot_top, plot_w, plot_h,
-                          min_cost, max_cost, range, costs, has_collision, has_smoothness, show_hints);
+                          min_cost, max_cost, range, costs, has_collision, show_hints, height);
         }
     }
 
-    void drawCostLabels(sf::RenderTarget& target, const sf::Font& font,
+    template<typename RenderTarget>
+    void drawCostLabels(RenderTarget& target, const sf::Font& font,
                         float plot_left, float plot_top, float plot_w, float plot_h,
                         float min_cost, float max_cost, float range,
                         const std::vector<float>& costs,
-                        bool has_collision, bool has_smoothness, bool show_hints) {
+                        bool has_collision, bool show_hints, unsigned int window_h) {
         // Title
         sf::Text title(font, "Cost Convergence", FontSize::title);
         title.setFillColor(Colors::text());
@@ -896,8 +1064,7 @@ private:
         // Legend
         float lx = plot_left + plot_w - 155.0f;
         float ly = plot_top + 12.0f;
-        float legend_h = 35.0f + (has_collision ? Layout::itemSpacing : 0.0f) + 
-                         (has_smoothness ? Layout::itemSpacing : 0.0f);
+        float legend_h = 35.0f + (has_collision ? Layout::itemSpacing : 0.0f);
         
         target.draw(createBox(lx, ly, 145.0f, legend_h, Colors::legendBg(), Colors::legendBorder()));
 
@@ -907,10 +1074,6 @@ private:
         if (has_collision) {
             item_y += Layout::itemSpacing;
             drawLegendEntry(target, font, lx + 8.0f, item_y, "Collision", Colors::collision(), Sizes::costLineSecondary);
-        }
-        if (has_smoothness) {
-            item_y += Layout::itemSpacing;
-            drawLegendEntry(target, font, lx + 8.0f, item_y, "Smoothness", Colors::smoothness(), Sizes::costLineSecondary);
         }
 
         // Stats box
@@ -938,321 +1101,498 @@ private:
 
         // Interactive hints
         if (show_hints) {
-            sf::Text hint(font, "S/P: Save PNG | C: Collision | O: Smoothness", FontSize::hint);
+            sf::Text hint(font, "S/P: Save PNG | C: Toggle Collision", FontSize::hint);
             hint.setFillColor(Colors::hint());
-            hint.setPosition({12.0f, window_height_ - 22.0f});
+            hint.setPosition({12.0f, window_h - 22.0f});
             target.draw(hint);
         }
     }
 
-    // === 3D Multi-View Drawing Functions ===
+    // === 3D Visualization Methods ===
+    // Uses primitives from visualization3d_base.h
 
-    enum class Projection { XY, XZ, YZ };
+    void computeHistoryBounds3D(const OptimizationHistory& history,
+                                 const std::vector<ObstacleND>& obstacles,
+                                 viz3d::Vec3& minB, viz3d::Vec3& maxB) {
+        minB = viz3d::Vec3(1e10f, 1e10f, 1e10f);
+        maxB = viz3d::Vec3(-1e10f, -1e10f, -1e10f);
 
-    struct ProjectionConfig {
-        Projection type;
-        std::string title;
-        std::string xlabel;
-        std::string ylabel;
-        int axis1;  // Index into position vector
-        int axis2;  // Index into position vector
-    };
-
-    void draw3DTrajectoryFigure(sf::RenderTarget& target,
-                                 const ObstacleMap& obstacle_map,
-                                 const OptimizationHistory& history,
-                                 int current_iter,
-                                 bool show_samples, bool show_all_means,
-                                 const sf::Font& font, bool font_loaded,
-                                 bool show_hints,
-                                 unsigned int total_width, unsigned int total_height) {
-        if (history.iterations.empty()) return;
-
-        const auto& current = history.iterations[current_iter];
-        const auto& mean_traj = current.mean_trajectory;
-        
-        // Check dimensionality
-        size_t dims = 2;
-        if (!mean_traj.nodes.empty()) {
-            dims = mean_traj.nodes[0].position.size();
-        }
-        
-        if (dims < 3) {
-            // Fall back to 2D if trajectory is not 3D
-            std::cerr << "Warning: Trajectory has " << dims << "D, using 2D visualization\n";
-            return;
-        }
-
-        // Compute data bounds across all dimensions
-        float bounds[3][2] = {{1e10f, -1e10f}, {1e10f, -1e10f}, {1e10f, -1e10f}};  // min, max for X, Y, Z
-        
         for (const auto& iter : history.iterations) {
             for (const auto& node : iter.mean_trajectory.nodes) {
-                for (int d = 0; d < 3; ++d) {
-                    bounds[d][0] = std::min(bounds[d][0], node.position(d));
-                    bounds[d][1] = std::max(bounds[d][1], node.position(d));
+                if (node.position.size() >= 3) {
+                    minB.x = std::min(minB.x, node.position(0));
+                    minB.y = std::min(minB.y, node.position(1));
+                    minB.z = std::min(minB.z, node.position(2));
+                    maxB.x = std::max(maxB.x, node.position(0));
+                    maxB.y = std::max(maxB.y, node.position(1));
+                    maxB.z = std::max(maxB.z, node.position(2));
                 }
             }
             for (const auto& sample : iter.samples) {
                 for (const auto& node : sample.nodes) {
-                    for (int d = 0; d < 3; ++d) {
-                        bounds[d][0] = std::min(bounds[d][0], node.position(d));
-                        bounds[d][1] = std::max(bounds[d][1], node.position(d));
+                    if (node.position.size() >= 3) {
+                        minB.x = std::min(minB.x, node.position(0));
+                        minB.y = std::min(minB.y, node.position(1));
+                        minB.z = std::min(minB.z, node.position(2));
+                        maxB.x = std::max(maxB.x, node.position(0));
+                        maxB.y = std::max(maxB.y, node.position(1));
+                        maxB.z = std::max(maxB.z, node.position(2));
                     }
                 }
             }
         }
-        
-        // Add padding to bounds
-        for (int d = 0; d < 3; ++d) {
-            float range = bounds[d][1] - bounds[d][0];
-            if (range < 1e-6f) range = 1.0f;
-            bounds[d][0] -= range * 0.08f;
-            bounds[d][1] += range * 0.08f;
-        }
 
-        // Define the three projection views
-        std::vector<ProjectionConfig> projections = {
-            {Projection::XY, "XY Plane (Top)", "X", "Y", 0, 1},
-            {Projection::XZ, "XZ Plane (Front)", "X", "Z", 0, 2},
-            {Projection::YZ, "YZ Plane (Side)", "Y", "Z", 1, 2}
-        };
-
-        // Layout: three views side by side
-        float view_width = total_width / 3.0f;
-        float view_height = total_height;
-
-        for (size_t v = 0; v < projections.size(); ++v) {
-            float offset_x = v * view_width;
-            drawProjectionView(target, obstacle_map, history, current_iter,
-                              show_samples, show_all_means, font, font_loaded,
-                              projections[v], bounds, offset_x, 0.0f,
-                              view_width, view_height, v == 0);  // Only show legend on first view
-        }
-
-        // Title bar with iteration info
-        if (font_loaded) {
-            std::ostringstream title_ss;
-            title_ss << "Iteration " << (current_iter + 1) << "/" << history.iterations.size()
-                     << "  |  Cost: " << std::fixed << std::setprecision(2) << current.total_cost;
-            sf::Text title(font, title_ss.str(), FontSize::title);
-            title.setFillColor(Colors::text());
-            title.setStyle(sf::Text::Bold);
-            title.setPosition({15.0f, 8.0f});
-            target.draw(title);
-
-            if (show_hints) {
-                sf::Text hint(font, "S/P: Save PNG | G: Save GIF | Space: Play | A: Samples | M: Means",
-                             FontSize::hint);
-                hint.setFillColor(Colors::hint());
-                hint.setPosition({15.0f, total_height - 22.0f});
-                target.draw(hint);
+        for (const auto& obs : obstacles) {
+            if (obs.dimensions() >= 3) {
+                minB.x = std::min(minB.x, obs.center(0) - obs.radius);
+                minB.y = std::min(minB.y, obs.center(1) - obs.radius);
+                minB.z = std::min(minB.z, obs.center(2) - obs.radius);
+                maxB.x = std::max(maxB.x, obs.center(0) + obs.radius);
+                maxB.y = std::max(maxB.y, obs.center(1) + obs.radius);
+                maxB.z = std::max(maxB.z, obs.center(2) + obs.radius);
             }
         }
+
+        viz3d::Vec3 range = maxB - minB;
+        minB = minB - range * 0.1f;
+        maxB = maxB + range * 0.1f;
     }
 
-    void drawProjectionView(sf::RenderTarget& target,
-                            const ObstacleMap& obstacle_map,
-                            const OptimizationHistory& history,
-                            int current_iter,
-                            bool show_samples, bool show_all_means,
-                            const sf::Font& font, bool font_loaded,
-                            const ProjectionConfig& proj,
-                            float bounds[3][2],
-                            float view_offset_x, float view_offset_y,
-                            float view_width, float view_height,
-                            bool show_legend) {
+    // Calculate 3D signed distance field for collision checking
+    float calculateSDF3D(const viz3d::Vec3& pos, const std::vector<ObstacleND>& obstacles) {
+        float min_sdf = std::numeric_limits<float>::max();
+        for (const auto& obs : obstacles) {
+            if (obs.dimensions() < 3) continue;
+            float dx = pos.x - obs.center(0);
+            float dy = pos.y - obs.center(1);
+            float dz = pos.z - obs.center(2);
+            float dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+            min_sdf = std::min(min_sdf, dist - obs.radius);
+        }
+        return min_sdf;
+    }
+
+    // Get collision status: 0=safe, 1=near, 2=collision
+    int getCollisionStatus(float effective_sdf, float threshold = 10.0f) {
+        if (effective_sdf < 0.0f) return 2;  // collision
+        if (effective_sdf < threshold) return 1;  // near
+        return 0;  // safe
+    }
+
+    sf::Color getCollisionColor(int status) {
+        if (status == 2) return Colors::inCollision();
+        if (status == 1) return Colors::nearCollision();
+        return Colors::safe();
+    }
+
+    template<typename RenderTarget>
+    void draw3DTrajectoryFigure(RenderTarget& target,
+                                 const ObstacleMap& obstacle_map,
+                                 const OptimizationHistory& history,
+                                 int current_iter,
+                                 bool show_samples, bool show_all_means,
+                                 const viz3d::Camera3D& cam,
+                                 const sf::Font& font, bool font_loaded,
+                                 bool show_hints,
+                                 unsigned int width, unsigned int height,
+                                 const viz3d::Vec3& minB, const viz3d::Vec3& maxB,
+                                 bool show_collision_spheres = false,
+                                 float collision_threshold = 10.0f) {
+        if (history.iterations.empty()) return;
+
         const auto& current = history.iterations[current_iter];
+        const auto& mean_traj = current.mean_trajectory;
 
-        // Margins for this view
-        float margin_left = 55.0f;
-        float margin_right = 15.0f;
-        float margin_top = 45.0f;
-        float margin_bottom = 50.0f;
+        // Check dimensionality
+        if (mean_traj.nodes.empty() || mean_traj.nodes[0].position.size() < 3) {
+            std::cerr << "Warning: Trajectory is not 3D\n";
+            return;
+        }
 
-        float plot_w = view_width - margin_left - margin_right;
-        float plot_h = view_height - margin_top - margin_bottom;
+        // Background gradient
+        viz3d::drawGradientBackground(target, width, height);
 
-        // Get data ranges for this projection
-        float data_w = bounds[proj.axis1][1] - bounds[proj.axis1][0];
-        float data_h = bounds[proj.axis2][1] - bounds[proj.axis2][0];
-        
-        // Maintain aspect ratio
-        float scale = std::min(plot_w / data_w, plot_h / data_h);
-        float plot_actual_w = data_w * scale;
-        float plot_actual_h = data_h * scale;
-        
-        float offset_x = view_offset_x + margin_left + (plot_w - plot_actual_w) / 2;
-        float offset_y = view_offset_y + margin_top + (plot_h - plot_actual_h) / 2;
+        // Grid and axes
+        viz3d::drawGrid(target, cam, minB, maxB, 10, width, height);
+        float axisLen = (maxB - minB).length() * 0.15f;
+        viz3d::drawAxes(target, cam, minB, axisLen, width, height, font_loaded ? &font : nullptr);
 
-        auto transform = [&](float a1, float a2) -> sf::Vector2f {
-            return {offset_x + (a1 - bounds[proj.axis1][0]) * scale,
-                    offset_y + (a2 - bounds[proj.axis2][0]) * scale};
-        };
+        // Compute depth range for proper rendering
+        float minDepth = cam.getDepth(cam.center) - (maxB - minB).length();
+        float maxDepth = cam.getDepth(cam.center) + (maxB - minB).length();
 
-        // Plot background
-        target.draw(createBox(offset_x, offset_y, plot_actual_w, plot_actual_h,
-                              sf::Color::White, Colors::axis(), Sizes::axisBorder));
-
-        // Draw obstacles projected onto this plane
+        // Draw obstacles
         for (const auto& obs : obstacle_map.getObstacles()) {
             if (obs.dimensions() >= 3) {
-                sf::Vector2f pos = transform(obs.center(proj.axis1), obs.center(proj.axis2));
-                float r = obs.radius * scale;
-                sf::CircleShape circle(r);
-                circle.setPosition({pos.x - r, pos.y - r});
-                circle.setFillColor(Colors::obstacle());
-                circle.setOutlineColor(Colors::obstacleBorder());
-                circle.setOutlineThickness(1.0f);
-                target.draw(circle);
+                viz3d::Vec3 pos(obs.center(0), obs.center(1), obs.center(2));
+                viz3d::drawCircle3D(target, cam, pos, obs.radius,
+                                    viz3d::colors::obstacle(), width, height,
+                                    true, minDepth, maxDepth);
             }
         }
 
-        // Samples
+        // Draw samples (thin, transparent)
         if (show_samples && !current.samples.empty()) {
+            sf::Color sampleColor = Colors::samples();
             for (const auto& sample : current.samples) {
                 for (size_t i = 0; i + 1 < sample.nodes.size(); ++i) {
-                    sf::Vector2f p1 = transform(sample.nodes[i].position(proj.axis1),
-                                                sample.nodes[i].position(proj.axis2));
-                    sf::Vector2f p2 = transform(sample.nodes[i+1].position(proj.axis1),
-                                                sample.nodes[i+1].position(proj.axis2));
-                    drawLine(target, p1, p2, Sizes::sampleLine, Colors::samples());
+                    if (sample.nodes[i].position.size() >= 3 &&
+                        sample.nodes[i+1].position.size() >= 3) {
+                        viz3d::Vec3 p1(sample.nodes[i].position(0),
+                                       sample.nodes[i].position(1),
+                                       sample.nodes[i].position(2));
+                        viz3d::Vec3 p2(sample.nodes[i+1].position(0),
+                                       sample.nodes[i+1].position(1),
+                                       sample.nodes[i+1].position(2));
+                        viz3d::drawLine3D(target, cam, p1, p2, 1.0f, sampleColor, width, height);
+                    }
                 }
             }
         }
 
-        // Previous trajectories
+        // Draw previous trajectories with gradient
         if (show_all_means && current_iter > 0) {
             for (int i = 0; i < current_iter; ++i) {
                 const auto& traj = history.iterations[i].mean_trajectory;
                 float t = (float)i / current_iter;
                 uint8_t alpha = static_cast<uint8_t>(50 + 150 * t);
                 sf::Color col(174, 199, 232, alpha);
-                
+
                 for (size_t j = 0; j + 1 < traj.nodes.size(); ++j) {
-                    sf::Vector2f p1 = transform(traj.nodes[j].position(proj.axis1),
-                                                traj.nodes[j].position(proj.axis2));
-                    sf::Vector2f p2 = transform(traj.nodes[j+1].position(proj.axis1),
-                                                traj.nodes[j+1].position(proj.axis2));
-                    drawLine(target, p1, p2, Sizes::previousLine, col);
+                    if (traj.nodes[j].position.size() >= 3 &&
+                        traj.nodes[j+1].position.size() >= 3) {
+                        viz3d::Vec3 p1(traj.nodes[j].position(0),
+                                       traj.nodes[j].position(1),
+                                       traj.nodes[j].position(2));
+                        viz3d::Vec3 p2(traj.nodes[j+1].position(0),
+                                       traj.nodes[j+1].position(1),
+                                       traj.nodes[j+1].position(2));
+                        viz3d::drawLine3D(target, cam, p1, p2, 2.0f, col, width, height);
+                    }
                 }
             }
         }
 
-        // Current trajectory
-        const auto& mean_traj = current.mean_trajectory;
+        // Draw current trajectory
         for (size_t i = 0; i + 1 < mean_traj.nodes.size(); ++i) {
-            sf::Vector2f p1 = transform(mean_traj.nodes[i].position(proj.axis1),
-                                        mean_traj.nodes[i].position(proj.axis2));
-            sf::Vector2f p2 = transform(mean_traj.nodes[i+1].position(proj.axis1),
-                                        mean_traj.nodes[i+1].position(proj.axis2));
-            drawLine(target, p1, p2, Sizes::currentLine, Colors::current());
+            viz3d::Vec3 p1(mean_traj.nodes[i].position(0),
+                           mean_traj.nodes[i].position(1),
+                           mean_traj.nodes[i].position(2));
+            viz3d::Vec3 p2(mean_traj.nodes[i+1].position(0),
+                           mean_traj.nodes[i+1].position(1),
+                           mean_traj.nodes[i+1].position(2));
+            viz3d::drawLine3D(target, cam, p1, p2, 3.0f, Colors::current(), width, height);
         }
 
-        // Waypoints
-        for (size_t i = 1; i + 1 < mean_traj.nodes.size(); ++i) {
-            sf::Vector2f pos = transform(mean_traj.nodes[i].position(proj.axis1),
-                                         mean_traj.nodes[i].position(proj.axis2));
-            sf::CircleShape marker(Sizes::waypoint - 1.0f);
-            marker.setPosition({pos.x - (Sizes::waypoint - 1.0f), pos.y - (Sizes::waypoint - 1.0f)});
-            marker.setFillColor(Colors::current());
-            target.draw(marker);
+        // Draw collision spheres if enabled
+        if (show_collision_spheres) {
+            // Count collision status for legend
+            int collision_count = 0, near_count = 0, safe_count = 0;
+            
+            for (size_t i = 0; i < mean_traj.nodes.size(); ++i) {
+                const auto& node = mean_traj.nodes[i];
+                if (node.position.size() < 3) continue;
+                
+                viz3d::Vec3 pos(node.position(0), node.position(1), node.position(2));
+                float sdf = calculateSDF3D(pos, obstacle_map.getObstacles());
+                float effective_sdf = sdf - node.radius;
+                int status = getCollisionStatus(effective_sdf, collision_threshold);
+                
+                if (status == 2) collision_count++;
+                else if (status == 1) near_count++;
+                else safe_count++;
+                
+                sf::Color col = getCollisionColor(status);
+                col.a = (status == 2) ? 230 : (status == 1) ? 200 : 180;
+                
+                viz3d::drawCircle3D(target, cam, pos, node.radius, col,
+                                    width, height, false, minDepth, maxDepth, true);
+            }
+            
+            // Draw collision status box
+            if (font_loaded) {
+                float sx = 15.0f;
+                float sy = height - 100.0f;
+                target.draw(createBox(sx, sy, 160.0f, 70.0f,
+                                      sf::Color(248, 250, 255, 248), Colors::legendBorder()));
+                
+                std::ostringstream ss1, ss2, ss3;
+                ss1 << "Collision: " << collision_count;
+                ss2 << "Near: " << near_count;
+                ss3 << "Safe: " << safe_count;
+                
+                sf::Text t1(font, ss1.str(), FontSize::stats);
+                t1.setFillColor(collision_count > 0 ? Colors::inCollision() : Colors::text());
+                t1.setPosition({sx + 12.0f, sy + 10.0f});
+                target.draw(t1);
+                
+                sf::Text t2(font, ss2.str(), FontSize::stats);
+                t2.setFillColor(near_count > 0 ? Colors::nearCollision() : Colors::text());
+                t2.setPosition({sx + 12.0f, sy + 30.0f});
+                target.draw(t2);
+                
+                sf::Text t3(font, ss3.str(), FontSize::stats);
+                t3.setFillColor(Colors::safe());
+                t3.setPosition({sx + 12.0f, sy + 50.0f});
+                target.draw(t3);
+            }
+        } else {
+            // Draw waypoints (only when not showing collision spheres)
+            for (size_t i = 1; i + 1 < mean_traj.nodes.size(); ++i) {
+                viz3d::Vec3 pos(mean_traj.nodes[i].position(0),
+                                mean_traj.nodes[i].position(1),
+                                mean_traj.nodes[i].position(2));
+                viz3d::drawCircle3D(target, cam, pos, 3.0f, Colors::current(),
+                                    width, height, false, minDepth, maxDepth);
+            }
         }
 
-        // Start and Goal markers
+        // Draw start and goal markers
         if (!mean_traj.nodes.empty()) {
-            sf::Vector2f start_pos = transform(mean_traj.nodes[mean_traj.start_index].position(proj.axis1),
-                                               mean_traj.nodes[mean_traj.start_index].position(proj.axis2));
-            sf::Vector2f goal_pos = transform(mean_traj.nodes[mean_traj.goal_index].position(proj.axis1),
-                                              mean_traj.nodes[mean_traj.goal_index].position(proj.axis2));
+            const auto& start_node = mean_traj.nodes[mean_traj.start_index];
+            const auto& goal_node = mean_traj.nodes[mean_traj.goal_index];
 
-            // Start (circle)
-            float sr = Sizes::startMarker - 2.0f;
-            sf::CircleShape start_marker(sr);
-            start_marker.setPosition({start_pos.x - sr, start_pos.y - sr});
-            start_marker.setFillColor(Colors::start());
-            start_marker.setOutlineColor(sf::Color(25, 100, 25));
-            start_marker.setOutlineThickness(1.5f);
-            target.draw(start_marker);
+            viz3d::Vec3 start_pos(start_node.position(0), start_node.position(1), start_node.position(2));
+            viz3d::Vec3 goal_pos(goal_node.position(0), goal_node.position(1), goal_node.position(2));
 
-            // Goal (square)
-            float gs = Sizes::goalMarker - 2.0f;
-            sf::RectangleShape goal_marker({gs, gs});
-            goal_marker.setPosition({goal_pos.x - gs / 2, goal_pos.y - gs / 2});
-            goal_marker.setFillColor(Colors::goal());
-            goal_marker.setOutlineColor(sf::Color(180, 90, 10));
-            goal_marker.setOutlineThickness(1.5f);
-            target.draw(goal_marker);
+            viz3d::drawCircle3D(target, cam, start_pos, 8.0f, Colors::start(),
+                                width, height, true, minDepth, maxDepth);
+            viz3d::drawCircle3D(target, cam, goal_pos, 8.0f, Colors::goal(),
+                                width, height, true, minDepth, maxDepth);
         }
 
+        // Draw UI overlay
         if (font_loaded) {
-            // View title
-            sf::Text title(font, proj.title, FontSize::axisLabel);
+            // Title with iteration info and costs
+            std::ostringstream title_ss;
+            title_ss << "Iter " << (current_iter + 1) << "/" << history.iterations.size()
+                     << "  |  Total: " << std::fixed << std::setprecision(2) << current.total_cost
+                     << "  |  Collision: " << std::setprecision(2) << current.collision_cost
+                     << "  |  Smooth: " << std::setprecision(2) << current.smoothness_cost;
+            if (show_collision_spheres) {
+                title_ss << "  [Collision View]";
+            }
+            sf::Text title(font, title_ss.str(), FontSize::title);
             title.setFillColor(Colors::text());
             title.setStyle(sf::Text::Bold);
-            sf::FloatRect tb = title.getLocalBounds();
-            title.setPosition({offset_x + plot_actual_w / 2 - tb.size.x / 2, view_offset_y + 28.0f});
+            title.setPosition({15.0f, 12.0f});
             target.draw(title);
 
-            // X-axis label
-            sf::Text xlabel(font, proj.xlabel, FontSize::tickLabel + 1);
-            xlabel.setFillColor(Colors::text());
-            sf::FloatRect xb = xlabel.getLocalBounds();
-            xlabel.setPosition({offset_x + plot_actual_w / 2 - xb.size.x / 2, 
-                               offset_y + plot_actual_h + 30.0f});
-            target.draw(xlabel);
+            // Legend - expanded when showing collision spheres
+            float lx = width - (show_collision_spheres ? 175.0f : 130.0f);
+            float ly = 15.0f;
+            float legend_h = show_collision_spheres ? 155.0f : 90.0f;
+            float legend_w = show_collision_spheres ? 160.0f : 115.0f;
+            target.draw(createBox(lx, ly, legend_w, legend_h, Colors::legendBg(), Colors::legendBorder()));
 
-            // Y-axis label
-            sf::Text ylabel(font, proj.ylabel, FontSize::tickLabel + 1);
-            ylabel.setFillColor(Colors::text());
-            ylabel.setRotation(sf::degrees(-90.0f));
-            ylabel.setPosition({view_offset_x + 18.0f, offset_y + plot_actual_h / 2 + 5.0f});
-            target.draw(ylabel);
-
-            // Tick labels
-            int n_ticks = 4;
-            for (int i = 0; i <= n_ticks; ++i) {
-                // X ticks
-                float data_x = bounds[proj.axis1][0] + i * (bounds[proj.axis1][1] - bounds[proj.axis1][0]) / n_ticks;
-                float sx = offset_x + i * plot_actual_w / n_ticks;
-                
-                std::ostringstream ssx;
-                ssx << std::fixed << std::setprecision(0) << data_x;
-                sf::Text xt(font, ssx.str(), FontSize::tickLabel - 1);
-                xt.setFillColor(Colors::text());
-                sf::FloatRect xtb = xt.getLocalBounds();
-                xt.setPosition({sx - xtb.size.x / 2, offset_y + plot_actual_h + 8.0f});
-                target.draw(xt);
-
-                // Y ticks
-                float data_y = bounds[proj.axis2][0] + i * (bounds[proj.axis2][1] - bounds[proj.axis2][0]) / n_ticks;
-                float sy = offset_y + i * plot_actual_h / n_ticks;
-                
-                std::ostringstream ssy;
-                ssy << std::fixed << std::setprecision(0) << data_y;
-                sf::Text yt(font, ssy.str(), FontSize::tickLabel - 1);
-                yt.setFillColor(Colors::text());
-                sf::FloatRect ytb = yt.getLocalBounds();
-                yt.setPosition({offset_x - ytb.size.x - 6.0f, sy - 5.0f});
-                target.draw(yt);
+            float item_y = ly + 10.0f;
+            
+            if (show_collision_spheres) {
+                drawLegendMarker(target, font, lx + 8.0f, item_y, "Safe", Colors::safe(), false);
+                item_y += 18.0f;
+                drawLegendMarker(target, font, lx + 8.0f, item_y, "Near collision", Colors::nearCollision(), false);
+                item_y += 18.0f;
+                drawLegendMarker(target, font, lx + 8.0f, item_y, "In collision", Colors::inCollision(), false);
+                item_y += 18.0f;
+                drawLegendMarker(target, font, lx + 8.0f, item_y, "Obstacles", viz3d::colors::obstacle(), false);
+                item_y += 18.0f;
             }
+            
+            drawLegendEntry(target, font, lx + 8.0f, item_y, "Current", Colors::current(), 2.5f);
+            item_y += 18.0f;
+            drawLegendMarker(target, font, lx + 8.0f, item_y, "Start", Colors::start(), false);
+            item_y += 18.0f;
+            drawLegendMarker(target, font, lx + 8.0f, item_y, "Goal", Colors::goal(), false);
 
-            // Legend (only on first view)
-            if (show_legend) {
-                float lx = offset_x + 8.0f;
-                float ly = offset_y + 8.0f;
-                
-                target.draw(createBox(lx, ly, 95.0f, 88.0f, Colors::legendBg(), Colors::legendBorder()));
-
-                float item_y = ly + 8.0f;
-                drawLegendEntry(target, font, lx + 6.0f, item_y, "Current", Colors::current(), 2.5f);
-                item_y += 18.0f;
-                drawLegendEntry(target, font, lx + 6.0f, item_y, "Previous", Colors::previous(), 2.0f);
-                item_y += 18.0f;
-                drawLegendMarker(target, font, lx + 6.0f, item_y, "Start", Colors::start(), false);
-                item_y += 18.0f;
-                drawLegendMarker(target, font, lx + 6.0f, item_y, "Goal", Colors::goal(), true);
+            // Hints
+            if (show_hints) {
+                sf::Text hint(font, "Drag: Rotate | Scroll: Zoom | Space: Play | R: Auto-rotate",
+                             FontSize::hint);
+                hint.setFillColor(Colors::hint());
+                hint.setPosition({15.0f, height - 25.0f});
+                target.draw(hint);
             }
+        }
+    }
+
+    void saveTrajectory3DImage(const ObstacleMap& obstacle_map,
+                                const OptimizationHistory& history,
+                                int iter, bool show_samples, bool show_all_means,
+                                const viz3d::Camera3D& cam,
+                                const sf::Font& font, bool font_loaded,
+                                int counter, float scale) {
+        unsigned int width_3d = window_width_ * 3 / 2;
+        unsigned int height_3d = window_height_;
+
+        unsigned int w = static_cast<unsigned int>(width_3d * scale);
+        unsigned int h = static_cast<unsigned int>(height_3d * scale);
+
+        sf::RenderTexture rt;
+        if (!rt.resize({w, h})) {
+            std::cerr << "Failed to create render texture\n";
+            return;
+        }
+
+        sf::View view(sf::FloatRect({0.f, 0.f}, {(float)width_3d, (float)height_3d}));
+        view.setViewport(sf::FloatRect({0.f, 0.f}, {1.f, 1.f}));
+        rt.setView(view);
+
+        viz3d::Vec3 minB, maxB;
+        computeHistoryBounds3D(history, obstacle_map.getObstacles(), minB, maxB);
+
+        rt.clear(sf::Color::White);
+        draw3DTrajectoryFigure(rt, obstacle_map, history, iter, show_samples, show_all_means,
+                               cam, font, font_loaded, false, width_3d, height_3d, minB, maxB);
+        rt.display();
+
+        std::string suffix = (scale > 1.0f) ? "_highres" : "";
+        std::string fname = output_prefix_ + "_trajectory3d_iter" + std::to_string(iter + 1) + suffix + ".png";
+
+        if (rt.getTexture().copyToImage().saveToFile(fname)) {
+            std::cout << "Saved: " << fname << " (" << w << "x" << h << ")\n";
+        }
+    }
+
+    void saveAnimation3DGIF(const ObstacleMap& obstacle_map,
+                            const OptimizationHistory& history,
+                            bool show_samples, bool show_all_means,
+                            viz3d::Camera3D cam,  // Copy for rotation
+                            const sf::Font& font, bool font_loaded,
+                            int delay_ms = 100,
+                            int collision_frames = 5,      // Frames with collision view at start/end
+                            float collision_threshold = 10.0f) {
+        if (history.iterations.empty()) return;
+
+        std::cout << "Saving 3D animation frames (with collision visualization)...\n";
+
+        unsigned int width_3d = window_width_ * 3 / 2;
+        unsigned int height_3d = window_height_;
+
+        unsigned int w = static_cast<unsigned int>(width_3d * GIF_SCALE);
+        unsigned int h = static_cast<unsigned int>(height_3d * GIF_SCALE);
+
+        sf::RenderTexture rt;
+        if (!rt.resize({w, h})) {
+            std::cerr << "Failed to create render texture\n";
+            return;
+        }
+
+        sf::View view(sf::FloatRect({0.f, 0.f}, {(float)width_3d, (float)height_3d}));
+        view.setViewport(sf::FloatRect({0.f, 0.f}, {1.f, 1.f}));
+        rt.setView(view);
+
+        viz3d::Vec3 minB, maxB;
+        computeHistoryBounds3D(history, obstacle_map.getObstacles(), minB, maxB);
+
+        std::string frame_dir = output_prefix_ + "_3d_frames";
+        std::system(("mkdir -p " + frame_dir).c_str());
+
+        int frame_num = 0;
+        size_t total_frames = collision_frames + history.iterations.size() + collision_frames;
+        
+        // Phase 1: Initial trajectory with collision visualization (static, first iteration)
+        std::cout << "  Phase 1: Initial collision view (" << collision_frames << " frames)\n";
+        for (int f = 0; f < collision_frames; ++f) {
+            rt.clear(sf::Color::White);
+            draw3DTrajectoryFigure(rt, obstacle_map, history, 0, false, false,
+                                   cam, font, font_loaded, false, width_3d, height_3d, minB, maxB,
+                                   true, collision_threshold);  // show_collision_spheres = true
+            rt.display();
+
+            std::ostringstream fname;
+            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << frame_num++ << ".png";
+            rt.getTexture().copyToImage().saveToFile(fname.str());
+            
+            // Slight rotation
+            cam.rotate(0.015f, 0);
+        }
+
+        // Phase 2: Optimization evolution (normal trajectory view)
+        std::cout << "  Phase 2: Optimization evolution (" << history.iterations.size() << " frames)\n";
+        for (size_t i = 0; i < history.iterations.size(); ++i) {
+            rt.clear(sf::Color::White);
+            draw3DTrajectoryFigure(rt, obstacle_map, history, i, show_samples, show_all_means,
+                                   cam, font, font_loaded, false, width_3d, height_3d, minB, maxB,
+                                   false, collision_threshold);  // show_collision_spheres = false
+            rt.display();
+
+            std::ostringstream fname;
+            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << frame_num++ << ".png";
+            rt.getTexture().copyToImage().saveToFile(fname.str());
+
+            // Slight rotation for visual interest
+            cam.rotate(0.02f, 0);
+
+            if ((i + 1) % 10 == 0) {
+                std::cout << "    Iteration " << (i + 1) << "/" << history.iterations.size() << "\n";
+            }
+        }
+
+        // Phase 3: Final trajectory with collision visualization (static, last iteration)
+        std::cout << "  Phase 3: Final collision view (" << collision_frames << " frames)\n";
+        int last_iter = history.iterations.size() - 1;
+        for (int f = 0; f < collision_frames; ++f) {
+            rt.clear(sf::Color::White);
+            draw3DTrajectoryFigure(rt, obstacle_map, history, last_iter, false, false,
+                                   cam, font, font_loaded, false, width_3d, height_3d, minB, maxB,
+                                   true, collision_threshold);  // show_collision_spheres = true
+            rt.display();
+
+            std::ostringstream fname;
+            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << frame_num++ << ".png";
+            rt.getTexture().copyToImage().saveToFile(fname.str());
+            
+            // Slight rotation
+            cam.rotate(0.015f, 0);
+        }
+        
+        std::cout << "  Total frames: " << frame_num << "\n";
+
+        std::string gif_name = output_prefix_ + "_3d_animation.gif";
+        
+        // Try multiple methods to create GIF
+        bool success = false;
+        
+        // Method 1: ImageMagick 7+ (magick)
+        std::ostringstream cmd1;
+        cmd1 << "magick -delay " << (delay_ms / 10) << " -loop 0 "
+             << frame_dir << "/frame_*.png " << gif_name << " 2>/dev/null";
+        
+        std::cout << "Creating GIF (trying magick)...\n";
+        if (std::system(cmd1.str().c_str()) == 0) {
+            success = true;
+        } else {
+            // Method 2: ImageMagick 6 (convert)
+            std::ostringstream cmd2;
+            cmd2 << "convert -delay " << (delay_ms / 10) << " -loop 0 "
+                 << frame_dir << "/frame_*.png " << gif_name << " 2>/dev/null";
+            
+            std::cout << "Trying convert...\n";
+            if (std::system(cmd2.str().c_str()) == 0) {
+                success = true;
+            } else {
+                // Method 3: ffmpeg
+                std::ostringstream cmd3;
+                cmd3 << "ffmpeg -y -framerate " << (1000 / delay_ms) << " -i "
+                     << frame_dir << "/frame_%04d.png "
+                     << "-vf \"split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" "
+                     << gif_name << " 2>/dev/null";
+                
+                std::cout << "Trying ffmpeg...\n";
+                if (std::system(cmd3.str().c_str()) == 0) {
+                    success = true;
+                }
+            }
+        }
+
+        if (success) {
+            std::cout << "Saved: " << gif_name << "\n";
+            std::system(("rm -rf " + frame_dir).c_str());
+        } else {
+            std::cerr << "GIF creation failed. Install one of:\n"
+                      << "  sudo apt install imagemagick\n"
+                      << "  sudo apt install ffmpeg\n"
+                      << "Frames saved in: " << frame_dir << "/\n";
         }
     }
 
@@ -1268,7 +1608,7 @@ private:
 
         rt.clear(sf::Color::White);
         drawTrajectoryFigure(rt, obstacle_map, history, iter, show_samples, show_all_means,
-                            font, font_loaded, false);
+                            font, font_loaded, false, window_width_, window_height_);
         rt.display();
 
         std::string suffix = (scale > 1.0f) ? "_highres" : "";
@@ -1284,13 +1624,14 @@ private:
 
     void saveCostImage(const OptimizationHistory& history,
                        const sf::Font& font, bool font_loaded,
-                       bool show_collision, bool show_smoothness,
+                       bool show_collision,
                        int counter, float scale) {
         sf::RenderTexture rt;
         if (!createRenderTexture(rt, scale)) return;
 
         rt.clear(sf::Color::White);
-        drawCostFigure(rt, history, font, font_loaded, show_collision, show_smoothness, false);
+        drawCostFigure(rt, history, font, font_loaded, show_collision, false,
+                      window_width_, window_height_);
         rt.display();
 
         std::string suffix = (scale > 1.0f) ? "_highres" : "";
@@ -1301,98 +1642,6 @@ private:
         
         if (rt.getTexture().copyToImage().saveToFile(fname)) {
             std::cout << "Saved: " << fname << " (" << w << "x" << h << ")\n";
-        }
-    }
-
-    void saveTrajectory3DImage(const ObstacleMap& obstacle_map,
-                                const OptimizationHistory& history,
-                                int iter, bool show_samples, bool show_all_means,
-                                const sf::Font& font, bool font_loaded,
-                                int counter, float scale) {
-        unsigned int width_3d = window_width_ * 3 / 2;
-        unsigned int height_3d = window_height_;
-        
-        unsigned int w = static_cast<unsigned int>(width_3d * scale);
-        unsigned int h = static_cast<unsigned int>(height_3d * scale);
-
-        sf::RenderTexture rt;
-        if (!rt.resize({w, h})) {
-            std::cerr << "Failed to create render texture\n";
-            return;
-        }
-
-        sf::View view(sf::FloatRect({0.f, 0.f}, {(float)width_3d, (float)height_3d}));
-        view.setViewport(sf::FloatRect({0.f, 0.f}, {1.f, 1.f}));
-        rt.setView(view);
-
-        rt.clear(sf::Color::White);
-        draw3DTrajectoryFigure(rt, obstacle_map, history, iter, show_samples, show_all_means,
-                               font, font_loaded, false, width_3d, height_3d);
-        rt.display();
-
-        std::string suffix = (scale > 1.0f) ? "_highres" : "";
-        std::string fname = output_prefix_ + "_trajectory3d_iter" + std::to_string(iter + 1) + suffix + ".png";
-        
-        if (rt.getTexture().copyToImage().saveToFile(fname)) {
-            std::cout << "Saved: " << fname << " (" << w << "x" << h << ")\n";
-        }
-    }
-
-    void saveAnimation3DGIF(const ObstacleMap& obstacle_map,
-                            const OptimizationHistory& history,
-                            bool show_samples, bool show_all_means,
-                            const sf::Font& font, bool font_loaded,
-                            int delay_ms = 100) {
-        if (history.iterations.empty()) return;
-
-        std::cout << "Saving 3D animation frames...\n";
-
-        unsigned int width_3d = window_width_ * 3 / 2;
-        unsigned int height_3d = window_height_;
-        
-        unsigned int w = static_cast<unsigned int>(width_3d * GIF_SCALE);
-        unsigned int h = static_cast<unsigned int>(height_3d * GIF_SCALE);
-
-        sf::RenderTexture rt;
-        if (!rt.resize({w, h})) {
-            std::cerr << "Failed to create render texture\n";
-            return;
-        }
-
-        sf::View view(sf::FloatRect({0.f, 0.f}, {(float)width_3d, (float)height_3d}));
-        view.setViewport(sf::FloatRect({0.f, 0.f}, {1.f, 1.f}));
-        rt.setView(view);
-
-        std::string frame_dir = output_prefix_ + "_3d_frames";
-        std::system(("mkdir -p " + frame_dir).c_str());
-
-        for (size_t i = 0; i < history.iterations.size(); ++i) {
-            rt.clear(sf::Color::White);
-            draw3DTrajectoryFigure(rt, obstacle_map, history, i, show_samples, show_all_means,
-                                   font, font_loaded, false, width_3d, height_3d);
-            rt.display();
-
-            std::ostringstream fname;
-            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << i << ".png";
-            rt.getTexture().copyToImage().saveToFile(fname.str());
-
-            if ((i + 1) % 10 == 0 || i == history.iterations.size() - 1) {
-                std::cout << "  Frame " << (i + 1) << "/" << history.iterations.size() << "\n";
-            }
-        }
-
-        std::string gif_name = output_prefix_ + "_3d_animation.gif";
-        std::ostringstream cmd;
-        cmd << "convert -delay " << (delay_ms / 10) << " -loop 0 "
-            << frame_dir << "/frame_*.png " << gif_name;
-
-        std::cout << "Creating GIF...\n";
-        if (std::system(cmd.str().c_str()) == 0) {
-            std::cout << "Saved: " << gif_name << "\n";
-            std::system(("rm -rf " + frame_dir).c_str());
-        } else {
-            std::cerr << "ImageMagick failed. Install with: sudo apt install imagemagick\n"
-                      << "Frames saved in: " << frame_dir << "/\n";
         }
     }
 };

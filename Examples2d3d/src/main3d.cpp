@@ -110,12 +110,12 @@ int main() {
         iter_data.mean_trajectory = traj_history_pce[i];
         iter_data.total_cost = task_pce->computeStateCost(traj_history_pce[i]);
         iter_data.collision_cost = iter_data.total_cost;
-        iter_data.smoothness_cost = 0.0f;
+        iter_data.smoothness_cost = planner_pce->computeSmoothnessCost(traj_history_pce[i]);
         pce_history.addIteration(iter_data);
     }
     
     pce_history.final_trajectory = planner_pce->getCurrentTrajectory();
-    pce_history.final_cost = task_pce->computeStateCost(pce_history.final_trajectory);
+    pce_history.final_cost = task_pce->computeStateCost(pce_history.final_trajectory) + planner_pce->computeSmoothnessCost(pce_history.final_trajectory);
     pce_history.converged = success_pce;
     pce_history.total_iterations = traj_history_pce.size();
 
@@ -158,12 +158,12 @@ int main() {
         iter_data.mean_trajectory = traj_history_ngd[i];
         iter_data.total_cost = task_ngd->computeStateCost(traj_history_ngd[i]);
         iter_data.collision_cost = iter_data.total_cost;
-        iter_data.smoothness_cost = 0.0f;
+        iter_data.smoothness_cost = planner_ngd->computeSmoothnessCost(traj_history_ngd[i]);
         ngd_history.addIteration(iter_data);
     }
 
     ngd_history.final_trajectory = planner_ngd->getCurrentTrajectory();
-    ngd_history.final_cost = task_ngd->computeStateCost(ngd_history.final_trajectory);
+    ngd_history.final_cost = task_ngd->computeStateCost(ngd_history.final_trajectory) + planner_ngd->computeSmoothnessCost(ngd_history.final_trajectory);
     ngd_history.converged = success_ngd;
     ngd_history.total_iterations = traj_history_ngd.size();
 
@@ -173,74 +173,74 @@ int main() {
         std::cout << "\n✗ NGD 3D optimization failed\n";
     }
 
-    // // =========================================================================
-    // // STOMP PLANNER (3D)
-    // // =========================================================================
-    // std::cout << "\n=== STOMP Planner (3D) ===\n";
+    // =========================================================================
+    // STOMP PLANNER (3D)
+    // =========================================================================
+    std::cout << "\n=== STOMP Planner (3D) ===\n";
 
-    // auto task_stomp = std::make_shared<pce::CollisionAvoidanceTask>(config);
-    // auto planner_stomp = std::make_shared<pce::StompMotionPlanner>(task_stomp);
+    auto task_stomp = std::make_shared<pce::CollisionAvoidanceTask>(config);
+    auto planner_stomp = std::make_shared<pce::StompMotionPlanner>(task_stomp);
 
-    // pce::StompPlannerConfig stomp_config;
-    // if (!stomp_config.loadFromFile(config_file)) {
-    //     std::cerr << "Failed to load STOMP configuration from file\n";
-    //     std::cerr << "Using default STOMP parameters for 3D...\n";
+    pce::StompPlannerConfig stomp_config;
+    if (!stomp_config.loadFromFile(config_file)) {
+        std::cerr << "Failed to load STOMP configuration from file\n";
+        std::cerr << "Using default STOMP parameters for 3D...\n";
         
-    //     if (const auto& mp = config["motion_planning"]) {
-    //         stomp_config.num_timesteps = mp["num_nodes"].as<size_t>(50);
-    //         stomp_config.num_dimensions = mp["num_dimensions"].as<size_t>(3);
-    //         if (mp["start_position"]) {
-    //             stomp_config.start_position = mp["start_position"].as<std::vector<float>>();
-    //         }
-    //         if (mp["goal_position"]) {
-    //             stomp_config.goal_position = mp["goal_position"].as<std::vector<float>>();
-    //         }
-    //     }
-    // }
+        if (const auto& mp = config["motion_planning"]) {
+            stomp_config.num_timesteps = mp["num_nodes"].as<size_t>(50);
+            stomp_config.num_dimensions = mp["num_dimensions"].as<size_t>(3);
+            if (mp["start_position"]) {
+                stomp_config.start_position = mp["start_position"].as<std::vector<float>>();
+            }
+            if (mp["goal_position"]) {
+                stomp_config.goal_position = mp["goal_position"].as<std::vector<float>>();
+            }
+        }
+    }
 
-    // std::cout << "\n=== Initializing STOMP Planner ===\n";
-    // if (!planner_stomp->initialize(stomp_config)) {
-    //     std::cerr << "Error: STOMP Planner initialization failed\n";
-    //     return 1;
-    // }
+    std::cout << "\n=== Initializing STOMP Planner ===\n";
+    if (!planner_stomp->initialize(stomp_config)) {
+        std::cerr << "Error: STOMP Planner initialization failed\n";
+        return 1;
+    }
 
-    // OptimizationHistory stomp_history;
-    // stomp_history.clear();
+    OptimizationHistory stomp_history;
+    stomp_history.clear();
 
-    // {
-    //     IterationData init_data;
-    //     init_data.iteration = 0;
-    //     init_data.mean_trajectory = planner_stomp->getCurrentTrajectory();
-    //     init_data.total_cost = task_stomp->computeStateCost(init_data.mean_trajectory);
-    //     init_data.collision_cost = init_data.total_cost;
-    //     init_data.smoothness_cost = 0.0f;
-    //     stomp_history.addIteration(init_data);
-    // }
+    {
+        IterationData init_data;
+        init_data.iteration = 0;
+        init_data.mean_trajectory = planner_stomp->getCurrentTrajectory();
+        init_data.total_cost = task_stomp->computeStateCost(init_data.mean_trajectory);
+        init_data.collision_cost = init_data.total_cost;
+        init_data.smoothness_cost = planner_stomp->computeSmoothnessCost(init_data.mean_trajectory);
+        stomp_history.addIteration(init_data);
+    }
 
-    // std::cout << "\n=== Running STOMP 3D Optimization ===\n";
-    // bool success_stomp = planner_stomp->solve();
+    std::cout << "\n=== Running STOMP 3D Optimization ===\n";
+    bool success_stomp = planner_stomp->solve();
 
-    // auto traj_history_stomp = planner_stomp->getTrajectoryHistory();
-    // for (size_t i = 0; i < traj_history_stomp.size(); ++i) {
-    //     IterationData iter_data;
-    //     iter_data.iteration = i;
-    //     iter_data.mean_trajectory = traj_history_stomp[i];
-    //     iter_data.total_cost = task_stomp->computeStateCost(traj_history_stomp[i]);
-    //     iter_data.collision_cost = iter_data.total_cost;
-    //     iter_data.smoothness_cost = 0.0f;
-    //     stomp_history.addIteration(iter_data);
-    // }
+    auto traj_history_stomp = planner_stomp->getTrajectoryHistory();
+    for (size_t i = 0; i < traj_history_stomp.size(); ++i) {
+        IterationData iter_data;
+        iter_data.iteration = i;
+        iter_data.mean_trajectory = traj_history_stomp[i];
+        iter_data.total_cost = task_stomp->computeStateCost(traj_history_stomp[i]);
+        iter_data.collision_cost = iter_data.total_cost;
+        iter_data.smoothness_cost = planner_stomp->computeSmoothnessCost(traj_history_stomp[i]);
+        stomp_history.addIteration(iter_data);
+    }
 
-    // stomp_history.final_trajectory = planner_stomp->getCurrentTrajectory();
-    // stomp_history.final_cost = task_stomp->computeStateCost(stomp_history.final_trajectory);
-    // stomp_history.converged = success_stomp;
-    // stomp_history.total_iterations = traj_history_stomp.size();
+    stomp_history.final_trajectory = planner_stomp->getCurrentTrajectory();
+    stomp_history.final_cost = task_stomp->computeStateCost(stomp_history.final_trajectory) + planner_stomp->computeSmoothnessCost(stomp_history.final_trajectory);
+    stomp_history.converged = success_stomp;
+    stomp_history.total_iterations = traj_history_stomp.size();
 
-    // if (success_stomp) {
-    //     std::cout << "\n✓ STOMP 3D optimization completed successfully\n";
-    // } else {
-    //     std::cout << "\n✗ STOMP 3D optimization failed\n";
-    // }
+    if (success_stomp) {
+        std::cout << "\n✓ STOMP 3D optimization completed successfully\n";
+    } else {
+        std::cout << "\n✗ STOMP 3D optimization failed\n";
+    }
 
     // // =========================================================================
     // // CASADI PLANNERS (3D)
@@ -349,14 +349,14 @@ int main() {
     std::cout << "Displaying NGD cost convergence...\n";
     visualizer.showCostPlot(ngd_history, "NGD 3D - Cost Convergence");
 
-    // // Show STOMP 3D trajectory evolution
-    // std::cout << "Displaying STOMP 3D trajectory evolution...\n";
-    // visualizer.setOutputPrefix("stomp_3d");
-    // visualizer.showTrajectoryEvolution3D(*obstacle_map_ptr, stomp_history, 
-    //                                       "STOMP 3D - Trajectory Evolution");
+    // Show STOMP 3D trajectory evolution
+    std::cout << "Displaying STOMP 3D trajectory evolution...\n";
+    visualizer.setOutputPrefix("stomp_3d");
+    visualizer.showTrajectoryEvolution3D(*obstacle_map_ptr, stomp_history, 
+                                          "STOMP 3D - Trajectory Evolution");
 
-    // std::cout << "Displaying STOMP cost convergence...\n";
-    // visualizer.showCostPlot(stomp_history, "STOMP 3D - Cost Convergence");
+    std::cout << "Displaying STOMP cost convergence...\n";
+    visualizer.showCostPlot(stomp_history, "STOMP 3D - Cost Convergence");
 
     // // Show CasADi 3D results
     // for (const auto& solver_name : casadi_solvers) {
@@ -388,7 +388,7 @@ int main() {
 
     auto pce_final_res = evaluate_final(planner_pce->getCurrentTrajectory());
     auto ngd_final_res = evaluate_final(planner_ngd->getCurrentTrajectory());
-    // auto stomp_final_res = evaluate_final(planner_stomp->getCurrentTrajectory());
+    auto stomp_final_res = evaluate_final(planner_stomp->getCurrentTrajectory());
 
     std::cout << std::left << std::setw(18) << "Planner" 
               << std::setw(12) << "Status" 
@@ -409,11 +409,11 @@ int main() {
               << std::setw(15) << ngd_final_res.first
               << ngd_final_res.second << "\n";
 
-    // std::cout << std::left << std::setw(18) << "STOMP (3D)" 
-    //           << std::setw(12) << (success_stomp ? "SUCCESS" : "FAILED")
-    //           << std::setw(10) << stomp_history.total_iterations
-    //           << std::setw(15) << stomp_final_res.first
-    //           << stomp_final_res.second << "\n";
+    std::cout << std::left << std::setw(18) << "STOMP (3D)" 
+              << std::setw(12) << (success_stomp ? "SUCCESS" : "FAILED")
+              << std::setw(10) << stomp_history.total_iterations
+              << std::setw(15) << stomp_final_res.first
+              << stomp_final_res.second << "\n";
 
     // for (const auto& solver_name : casadi_solvers) {
     //     if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
@@ -441,10 +441,10 @@ int main() {
         best_planner = "NGD (3D)";
     }
     
-    // if (stomp_final_res.first < best_cost && !std::isnan(stomp_final_res.first)) {
-    //     best_cost = stomp_final_res.first;
-    //     best_planner = "STOMP (3D)";
-    // }
+    if (stomp_final_res.first < best_cost && !std::isnan(stomp_final_res.first)) {
+        best_cost = stomp_final_res.first;
+        best_planner = "STOMP (3D)";
+    }
     
     // for (const auto& solver_name : casadi_solvers) {
     //     if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
