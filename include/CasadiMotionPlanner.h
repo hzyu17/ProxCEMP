@@ -44,8 +44,8 @@ inline std::string solverTypeToString(CasADiSolverType type) {
 struct CasADiConfig : public MotionPlannerConfig {
     // Common
     size_t max_iterations = 200;
-    float tolerance = 1e-6f;
-    float collision_weight = 1.0f;
+    float tolerance = 1e-4f;          // Relaxed from 1e-6
+    float collision_weight = 10.0f;
     float finite_diff_eps = 1e-4f;
     bool verbose_solver = true;
     std::string solver = "lbfgs";
@@ -54,26 +54,34 @@ struct CasADiConfig : public MotionPlannerConfig {
     // L-BFGS
     size_t lbfgs_history = 10;
     
-    // IPOPT
+    // IPOPT - improved defaults
     std::string ipopt_linear_solver = "mumps";
     std::string ipopt_hessian_approx = "limited-memory";
-    int ipopt_print_level = 5;
+    int ipopt_print_level = 0;           // Reduce verbosity (was 5)
     double ipopt_max_cpu_time = 60.0;
-    double ipopt_acceptable_tol = 1e-4;
-    int ipopt_acceptable_iter = 5;
-    bool ipopt_warm_start = false;
+    double ipopt_tol = 1e-4;             // Main convergence tolerance
+    double ipopt_acceptable_tol = 1e-2;  // Relaxed acceptable tolerance
+    int ipopt_acceptable_iter = 10;      // Accept after 10 acceptable iterations
+    bool ipopt_warm_start = true;        // Enable warm starting
+    int ipopt_max_iter = 500;            // Increased from 100
     
-    // SCP
-    int scp_max_outer_iter = 50;
-    double scp_trust_region_init = 10.0;
-    double scp_trust_region_min = 1e-4;
-    double scp_trust_region_max = 1000.0;
-    double scp_trust_expand = 2.0;
+    // Scaling - NEW
+    bool use_objective_scaling = true;
+    double objective_scale = 1e-4;       // Scale down large objectives
+    
+    // SCP - improved defaults
+    int scp_max_outer_iter = 100;        // Increased from 50
+    double scp_trust_region_init = 5.0;  // Smaller initial trust (was 10)
+    double scp_trust_region_min = 1e-6;  // Smaller minimum (was 1e-4)
+    double scp_trust_region_max = 100.0; // Smaller maximum (was 1000)
+    double scp_trust_expand = 1.5;       // More conservative expansion (was 2.0)
     double scp_trust_shrink = 0.5;
     double scp_accept_ratio = 0.1;
     double scp_good_ratio = 0.75;
-    int scp_inner_max_iter = 50;
-    double scp_convergence_tol = 1e-4;
+    int scp_inner_max_iter = 200;        // Increased from 50
+    double scp_convergence_tol = 1e-3;   // Relaxed from 1e-4
+    double scp_cost_improvement_tol = 1e-4; // NEW: minimum relative cost improvement
+    int scp_stall_limit = 10;            // NEW: stop after N iterations without improvement
     
     // SQP
     std::string sqp_qp_solver = "qpoases";
@@ -128,12 +136,20 @@ public:
                 loadParam(ip, "hessian_approximation", ipopt_hessian_approx);
                 loadParam(ip, "print_level", ipopt_print_level);
                 loadParam(ip, "max_cpu_time", ipopt_max_cpu_time);
+                loadParam(ip, "tol", ipopt_tol);
                 loadParam(ip, "acceptable_tol", ipopt_acceptable_tol);
                 loadParam(ip, "acceptable_iter", ipopt_acceptable_iter);
+                loadParam(ip, "max_iter", ipopt_max_iter);
                 if (ip["warm_start_init_point"]) {
                     std::string ws = ip["warm_start_init_point"].as<std::string>();
                     ipopt_warm_start = (ws == "yes" || ws == "true" || ws == "1");
                 }
+            }
+            
+            if (c["scaling"]) {
+                const auto& sc = c["scaling"];
+                loadParam(sc, "use_objective_scaling", use_objective_scaling);
+                loadParam(sc, "objective_scale", objective_scale);
             }
             
             if (c["scp"]) {
@@ -148,6 +164,8 @@ public:
                 loadParam(scp, "good_ratio", scp_good_ratio);
                 loadParam(scp, "inner_max_iter", scp_inner_max_iter);
                 loadParam(scp, "convergence_tol", scp_convergence_tol);
+                loadParam(scp, "cost_improvement_tol", scp_cost_improvement_tol);
+                loadParam(scp, "stall_limit", scp_stall_limit);
             }
             
             if (c["sqp"]) {
@@ -202,8 +220,16 @@ public:
             case CasADiSolverType::LBFGS:
                 std::cout << "L-BFGS history: " << lbfgs_history << "\n"; break;
             case CasADiSolverType::IPOPT:
-                std::cout << "IPOPT - linear_solver: " << ipopt_linear_solver << ", hessian: " << ipopt_hessian_approx << "\n"
-                          << "SCP - max_outer: " << scp_max_outer_iter << ", trust_init: " << scp_trust_region_init << "\n"; break;
+                std::cout << "IPOPT - linear_solver: " << ipopt_linear_solver 
+                          << ", hessian: " << ipopt_hessian_approx 
+                          << ", max_iter: " << ipopt_max_iter << "\n"
+                          << "IPOPT - tol: " << ipopt_tol << ", acceptable_tol: " << ipopt_acceptable_tol << "\n"
+                          << "SCP - max_outer: " << scp_max_outer_iter 
+                          << ", inner_max: " << scp_inner_max_iter
+                          << ", trust_init: " << scp_trust_region_init << "\n"
+                          << "Scaling: " << (use_objective_scaling ? "yes" : "no")
+                          << ", scale: " << objective_scale << "\n"; 
+                break;
             case CasADiSolverType::SQP:
                 std::cout << "SQP - qp_solver: " << sqp_qp_solver << ", max_ls: " << sqp_max_iter_ls << "\n"; break;
             case CasADiSolverType::GRADIENT_DESCENT:
@@ -356,7 +382,7 @@ private:
     std::shared_ptr<CasADiConfig> cfg_;
     
     // Helper functions
-    casadi::SX buildSmoothnessCostSymbolic(const casadi::SX& Y, size_t N, size_t D) {
+    casadi::SX buildSmoothnessCostSymbolic(const casadi::SX& Y, size_t N, size_t D, double scale = 1.0) {
         using namespace casadi;
         std::vector<SX> traj(N * D);
         
@@ -373,13 +399,13 @@ private:
                 SX accel = (traj[(i-1)*D+d] - 2*traj[i*D+d] + traj[(i+1)*D+d]) / (dt*dt);
                 cost += accel * accel;
             }
-        return cost;
+        return cost * scale;
     }
     
-    casadi::Function buildSmoothnessGradientFunction(size_t N, size_t D, size_t n_vars) {
+    casadi::Function buildSmoothnessGradientFunction(size_t N, size_t D, size_t n_vars, double scale = 1.0) {
         using namespace casadi;
         SX Y = SX::sym("Y", n_vars);
-        SX cost = buildSmoothnessCostSymbolic(Y, N, D);
+        SX cost = buildSmoothnessCostSymbolic(Y, N, D, scale);
         return Function("grad_smooth", {Y}, {cost, gradient(cost, Y)});
     }
     
@@ -415,16 +441,17 @@ private:
         }
     }
     
-    double computeTotalCost(const std::vector<double>& x, const casadi::Function& smooth_func) {
+    double computeTotalCost(const std::vector<double>& x, const casadi::Function& smooth_func, double scale = 1.0) {
         auto result = smooth_func(std::vector<casadi::DM>{casadi::DM(x)});
-        return static_cast<double>(result[0].scalar()) + 
-               cfg_->collision_weight * task_->computeStateCostSimple(vectorToTrajectory(x));
+        double smooth = static_cast<double>(result[0].scalar()) / scale; // Unscale for true cost
+        return smooth + cfg_->collision_weight * task_->computeStateCostSimple(vectorToTrajectory(x));
     }
     
     double evaluateCostAndGradient(const std::vector<double>& x, std::vector<double>& grad,
-                                   const casadi::Function& grad_func, double& smooth, double& coll) {
+                                   const casadi::Function& grad_func, double& smooth, double& coll,
+                                   double scale = 1.0) {
         auto result = grad_func(std::vector<casadi::DM>{casadi::DM(x)});
-        smooth = static_cast<double>(result[0].scalar());
+        smooth = static_cast<double>(result[0].scalar()) / scale; // Unscale
         auto grad_smooth = result[1].get_elements();
         
         coll = task_->computeStateCostSimple(vectorToTrajectory(x));
@@ -434,7 +461,7 @@ private:
         
         grad.resize(x.size());
         for (size_t i = 0; i < x.size(); ++i)
-            grad[i] = grad_smooth[i] + cfg_->collision_weight * grad_coll[i];
+            grad[i] = grad_smooth[i] + cfg_->collision_weight * grad_coll[i] * scale;
         
         return smooth + cfg_->collision_weight * coll;
     }
@@ -442,41 +469,75 @@ private:
     // Solver implementations
     bool runIPOPT_SCP(std::vector<double>& x, size_t n_vars, size_t N, size_t D) {
         using namespace casadi;
-        log("\nStarting IPOPT with SCP...\n");
+        log("\nStarting IPOPT with SCP (Trust Region)...\n");
         
-        Function smooth_func = buildSmoothnessGradientFunction(N, D, n_vars);
+        // Compute scaling factor based on initial cost
+        Trajectory init_traj = vectorToTrajectory(x);
+        double init_coll = task_->computeStateCostSimple(init_traj);
+        double scale = cfg_->use_objective_scaling ? cfg_->objective_scale : 1.0;
+        
+        logf("Using objective scale: %.2e", scale);
+        
+        Function smooth_func = buildSmoothnessGradientFunction(N, D, n_vars, scale);
         std::vector<double> x_k = x;
         double trust = cfg_->scp_trust_region_init;
-        double current_cost = computeTotalCost(x_k, smooth_func);
-        int rejects = 0;
+        double current_cost = computeTotalCost(x_k, smooth_func, scale);
+        double best_cost = current_cost;
+        std::vector<double> x_best = x_k;
+        
+        int stall_count = 0;
+        int total_inner_iters = 0;
+        
+        logf("Initial cost: %.2f, Trust radius: %.4f", current_cost, trust);
         
         for (int outer = 0; outer < cfg_->scp_max_outer_iter; ++outer) {
+            // Compute collision cost and gradient at current point
             double coll_k = task_->computeStateCostSimple(vectorToTrajectory(x_k));
             std::vector<double> grad_coll_k;
             computeCollisionGradient(x_k, grad_coll_k);
             
+            // Build convex subproblem with scaled objective
             SX Y = SX::sym("Y", n_vars);
-            SX cost = buildSmoothnessCostSymbolic(Y, N, D);
-            SX lin_coll = coll_k;
+            SX cost = buildSmoothnessCostSymbolic(Y, N, D, scale);
+            
+            // Linearized collision (scaled)
+            SX lin_coll = coll_k * scale;
             for (size_t i = 0; i < n_vars; ++i)
-                lin_coll += grad_coll_k[i] * (Y(i) - x_k[i]);
+                lin_coll += grad_coll_k[i] * scale * (Y(i) - x_k[i]);
             cost += cfg_->collision_weight * lin_coll;
             
+            // Trust region bounds
             std::vector<double> lbx(n_vars), ubx(n_vars);
             for (size_t i = 0; i < n_vars; ++i) {
                 lbx[i] = x_k[i] - trust;
                 ubx[i] = x_k[i] + trust;
             }
             
+            // IPOPT options - tuned for better convergence
             Dict opts;
             opts["ipopt.max_iter"] = cfg_->scp_inner_max_iter;
-            opts["ipopt.tol"] = static_cast<double>(cfg_->tolerance);
+            opts["ipopt.tol"] = cfg_->ipopt_tol;
+            opts["ipopt.acceptable_tol"] = cfg_->ipopt_acceptable_tol;
+            opts["ipopt.acceptable_iter"] = cfg_->ipopt_acceptable_iter;
             opts["ipopt.linear_solver"] = cfg_->ipopt_linear_solver;
             opts["ipopt.hessian_approximation"] = cfg_->ipopt_hessian_approx;
-            opts["ipopt.warm_start_init_point"] = "yes";
-            opts["ipopt.print_level"] = (cfg_->verbose_solver && outer % 5 == 0) ? 3 : 0;
+            
+            // Warm start settings
+            if (cfg_->ipopt_warm_start && outer > 0) {
+                opts["ipopt.warm_start_init_point"] = "yes";
+                opts["ipopt.warm_start_bound_push"] = 1e-9;
+                opts["ipopt.warm_start_bound_frac"] = 1e-9;
+                opts["ipopt.warm_start_slack_bound_frac"] = 1e-9;
+                opts["ipopt.warm_start_slack_bound_push"] = 1e-9;
+                opts["ipopt.warm_start_mult_bound_push"] = 1e-9;
+                opts["ipopt.mu_init"] = 1e-6;
+            }
+            
+            // Verbosity control
+            opts["ipopt.print_level"] = (cfg_->verbose_solver && outer % 10 == 0) ? 3 : 0;
             opts["print_time"] = false;
             
+            // Create and solve
             Function solver;
             try {
                 solver = nlpsol("solver", "ipopt", SXDict{{"x", Y}, {"f", cost}}, opts);
@@ -487,46 +548,89 @@ private:
             
             auto result = solver(DMDict{{"x0", DM(x_k)}, {"lbx", DM(lbx)}, {"ubx", DM(ubx)}});
             auto x_trial = result.at("x").get_elements();
-            double pred_cost = static_cast<double>(result.at("f").scalar());
-            double actual_cost = computeTotalCost(x_trial, smooth_func);
+            
+            // Get solver stats
+            Dict stats = solver.stats();
+            int inner_iters = 0;
+            if (stats.find("iter_count") != stats.end()) {
+                inner_iters = static_cast<int>(stats.at("iter_count"));
+                total_inner_iters += inner_iters;
+            }
+            
+            // Evaluate actual cost (unscaled)
+            double actual_cost = computeTotalCost(x_trial, smooth_func, scale);
+            double pred_cost = static_cast<double>(result.at("f").scalar()) / scale; // Unscale
             
             double pred_red = current_cost - pred_cost;
             double actual_red = current_cost - actual_cost;
             double ratio = (std::abs(pred_red) > 1e-10) ? actual_red / pred_red : 0.0;
             
+            // Step size
             double step = 0;
             for (size_t i = 0; i < n_vars; ++i)
                 step = std::max(step, std::abs(x_trial[i] - x_k[i]));
             
-            if (cfg_->verbose_solver)
-                logf("SCP %3d: %.2f->%.2f, ratio=%.3f, trust=%.4f, step=%.4f",
-                     outer, current_cost, actual_cost, ratio, trust, step);
+            // Relative improvement
+            double rel_improvement = (current_cost > 1e-10) ? actual_red / current_cost : 0.0;
             
+            if (cfg_->verbose_solver) {
+                logf("SCP %3d: %.2f->%.2f (pred %.2f), ratio=%.3f, trust=%.2f, step=%.4f, inner=%d",
+                     outer, current_cost, actual_cost, pred_cost, ratio, trust, step, inner_iters);
+            }
+            
+            // Accept or reject
             if (ratio >= cfg_->scp_accept_ratio && actual_cost < current_cost) {
                 x_k = x_trial;
+                double old_cost = current_cost;
                 current_cost = actual_cost;
-                rejects = 0;
+                
+                // Track best solution
+                if (current_cost < best_cost) {
+                    best_cost = current_cost;
+                    x_best = x_k;
+                    stall_count = 0;
+                } else {
+                    stall_count++;
+                }
+                
+                // Expand trust region if good step
                 if (ratio >= cfg_->scp_good_ratio)
                     trust = std::min(trust * cfg_->scp_trust_expand, cfg_->scp_trust_region_max);
+                
+                // Check for convergence
+                if (rel_improvement < cfg_->scp_cost_improvement_tol && step < cfg_->scp_convergence_tol) {
+                    logf("SCP converged at iter %d (rel_impr=%.2e, step=%.2e)", outer, rel_improvement, step);
+                    x = x_k;
+                    return true;
+                }
             } else {
                 trust *= cfg_->scp_trust_shrink;
-                rejects++;
+                stall_count++;
+                if (cfg_->verbose_solver)
+                    log("         Step rejected");
             }
             
-            if (step < cfg_->scp_convergence_tol && rejects == 0) {
-                logf("SCP converged at iter %d", outer);
-                x = x_k;
+            // Check stall
+            if (stall_count >= cfg_->scp_stall_limit) {
+                logf("SCP stalled after %d iterations without improvement", stall_count);
+                x = x_best;
                 return true;
             }
+            
+            // Check trust region
             if (trust < cfg_->scp_trust_region_min) {
-                log("Trust region too small");
-                x = x_k;
+                logf("Trust region too small (%.2e), stopping", trust);
+                x = x_best;
                 return true;
             }
-            if (outer % 5 == 0) trajectory_history_.push_back(vectorToTrajectory(x_k));
+            
+            // Store trajectory periodically
+            if (outer % 10 == 0)
+                trajectory_history_.push_back(vectorToTrajectory(x_k));
         }
         
-        x = x_k;
+        logf("SCP reached max iterations, total inner: %d", total_inner_iters);
+        x = x_best;
         return true;
     }
     
@@ -534,10 +638,11 @@ private:
         using namespace casadi;
         log("\nStarting SQP with SCP...\n");
         
-        Function smooth_func = buildSmoothnessGradientFunction(N, D, n_vars);
+        double scale = cfg_->use_objective_scaling ? cfg_->objective_scale : 1.0;
+        Function smooth_func = buildSmoothnessGradientFunction(N, D, n_vars, scale);
         std::vector<double> x_k = x;
         double trust = cfg_->scp_trust_region_init;
-        double current_cost = computeTotalCost(x_k, smooth_func);
+        double current_cost = computeTotalCost(x_k, smooth_func, scale);
         
         for (int outer = 0; outer < cfg_->scp_max_outer_iter; ++outer) {
             double coll_k = task_->computeStateCostSimple(vectorToTrajectory(x_k));
@@ -545,10 +650,10 @@ private:
             computeCollisionGradient(x_k, grad_coll_k);
             
             SX Y = SX::sym("Y", n_vars);
-            SX cost = buildSmoothnessCostSymbolic(Y, N, D);
-            SX lin_coll = coll_k;
+            SX cost = buildSmoothnessCostSymbolic(Y, N, D, scale);
+            SX lin_coll = coll_k * scale;
             for (size_t i = 0; i < n_vars; ++i)
-                lin_coll += grad_coll_k[i] * (Y(i) - x_k[i]);
+                lin_coll += grad_coll_k[i] * scale * (Y(i) - x_k[i]);
             cost += cfg_->collision_weight * lin_coll;
             
             std::vector<double> lbx(n_vars), ubx(n_vars);
@@ -559,10 +664,10 @@ private:
             
             Dict opts;
             opts["max_iter"] = cfg_->scp_inner_max_iter;
-            opts["tol_pr"] = opts["tol_du"] = static_cast<double>(cfg_->tolerance);
+            opts["tol_pr"] = opts["tol_du"] = cfg_->ipopt_tol;
             opts["qpsol"] = cfg_->sqp_qp_solver;
             opts["print_time"] = false;
-            opts["print_iteration"] = cfg_->verbose_solver && (outer % 5 == 0);
+            opts["print_iteration"] = cfg_->verbose_solver && (outer % 10 == 0);
             
             Function solver;
             try {
@@ -574,8 +679,8 @@ private:
             
             auto result = solver(DMDict{{"x0", DM(x_k)}, {"lbx", DM(lbx)}, {"ubx", DM(ubx)}});
             auto x_trial = result.at("x").get_elements();
-            double pred_cost = static_cast<double>(result.at("f").scalar());
-            double actual_cost = computeTotalCost(x_trial, smooth_func);
+            double pred_cost = static_cast<double>(result.at("f").scalar()) / scale;
+            double actual_cost = computeTotalCost(x_trial, smooth_func, scale);
             
             double ratio = 0;
             if (double pred_red = current_cost - pred_cost; std::abs(pred_red) > 1e-10)

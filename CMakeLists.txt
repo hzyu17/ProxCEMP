@@ -6,10 +6,21 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(BUILD_SHARED_LIBS OFF)
 
-# For Debugging
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -g")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+# Build type (Release for performance, Debug for debugging)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
 
+# Compiler flags
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+
+# Optional: Enable ASan for debugging (disabled by default)
+option(ENABLE_ASAN "Enable Address Sanitizer" OFF)
+if(ENABLE_ASAN)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+endif()
 
 add_subdirectory(external/stomp)
 add_subdirectory(Examples2d3d)
@@ -33,7 +44,12 @@ target_include_directories(pce_motion_planner INTERFACE
 )
 
 # Link Eigen3
-target_link_libraries(pce_motion_planner INTERFACE Eigen3::Eigen ${CASADI_LIBRARIES} OpenMP::OpenMP_CXX stomp)
+target_link_libraries(pce_motion_planner INTERFACE 
+    Eigen3::Eigen 
+    ${CASADI_LIBRARIES} 
+    OpenMP::OpenMP_CXX 
+    stomp
+)
 
 # Installation rules
 include(GNUInstallDirs)

@@ -1,5 +1,5 @@
 #include "CasadiMotionPlanner.h"
-#include "CollisionAvoidanceTask.h"
+#include "CasadiCollisionTask.h"
 #include "ObstacleMap.h"
 #include "visualization.h"
 #include "visualization_base.h"
@@ -22,23 +22,24 @@ int main() {
     YAML::Node config = YAML::LoadFile(config_file);
     bool visualize = config["experiment"]["visualize_initial_state"].as<bool>(false);
 
-    // Define solvers to test (sqp excluded - needs qpoases library)
-    std::vector<std::string> casadi_solvers = {"ipopt", "scp", "sqp", "gd", "adam", "lbfgs"};
+    // Define solvers to test
+    // Note: "sqp" requires qpoases library, exclude if not available
+    std::vector<std::string> casadi_solvers = {"lbfgs", "ipopt", "gd", "adam"};
 
     // Store results for each solver
     std::map<std::string, OptimizationHistory> casadi_histories;
     std::map<std::string, bool> casadi_success;
     std::map<std::string, std::shared_ptr<CasADiMotionPlanner>> casadi_planners;
-    std::map<std::string, std::shared_ptr<pce::CollisionAvoidanceTask>> casadi_tasks;
+    std::map<std::string, std::shared_ptr<pce::CasadiCollisionTask>> casadi_tasks;
 
     for (const auto& solver_name : casadi_solvers) {
         std::cout << "\n=== CasADi Planner (" << solver_name << ") ===\n";
 
-        // Create fresh task for each solver
-        auto task = std::make_shared<pce::CollisionAvoidanceTask>(config);
+        // Create CasadiCollisionTask (extends CollisionAvoidanceTask with symbolic costs)
+        auto task = std::make_shared<pce::CasadiCollisionTask>(config);
         casadi_tasks[solver_name] = task;
 
-        // Create planner
+        // Create planner with CasADi-aware task
         auto planner = std::make_shared<CasADiMotionPlanner>(task);
         casadi_planners[solver_name] = planner;
 

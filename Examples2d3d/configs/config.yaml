@@ -1,4 +1,7 @@
 casadi_planner:
+  scaling:
+    use_objective_scaling: true
+    objective_scale: 1e-4
   adam:
     beta1: 0.9
     beta2: 0.999
@@ -12,8 +15,10 @@ casadi_planner:
     momentum: 0.9
     use_nesterov: true
   ipopt:
+    tol: 1e-4
+    acceptable_tol: 1e-2
+    max_iter: 500
     acceptable_iter: 5
-    acceptable_tol: 1e-4
     hessian_approximation: limited-memory
     linear_solver: mumps
     max_cpu_time: 60.0
@@ -27,13 +32,14 @@ casadi_planner:
     accept_ratio: 0.1
     convergence_tol: 1e-4
     good_ratio: 0.75
-    inner_max_iter: 100          # Updated: was 50
+    inner_max_iter: 200         
     max_outer_iter: 50
     trust_expand: 2.0
     trust_region_init: 10.0
     trust_region_max: 1000.0
     trust_region_min: 1e-4
     trust_shrink: 0.5
+    stall_limit: 10
   solver: ipopt
   sqp:
     beta: 0.5
