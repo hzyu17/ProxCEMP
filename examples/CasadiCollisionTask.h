@@ -2,10 +2,11 @@
  * @file CasadiCollisionTask.h
  * @brief CasADi symbolic collision cost functions for trajectory optimization
  * 
- * Provides smooth, differentiable collision costs that enable:
- * - Analytical gradients via CasADi automatic differentiation
- * - Direct use with IPOPT/SQP without finite differences
- * - Smooth approximations of hinge loss for better convergence
+ * Provides smooth, differentiable collision costs. 
+ * 
+ * NOTE: Smoothness cost should be computed using MotionPlanner's R_matrix_ 
+ * and computeSmoothnessCost() to ensure consistency. This file focuses on
+ * collision cost only.
  */
 #pragma once
 
@@ -16,14 +17,12 @@ namespace pce {
 
 /**
  * @brief Utility class for CasADi symbolic collision cost construction
- * 
- * This class provides static methods and a wrapper around CollisionAvoidanceTask
- * to build smooth, differentiable collision costs for use with CasADi-based optimizers.
  */
 class CasadiCollisionCost {
 public:
     using VectorXf = Eigen::VectorXf;
     using MatrixXf = Eigen::MatrixXf;
+    using SparseMatrixXf = Eigen::SparseMatrix<float>;
     
     // ==================== Smooth Approximation Functions ====================
     
@@ -32,30 +31,17 @@ public:
      * 
      * softplus(x, k) = log(1 + exp(k*x)) / k
      * 
-     * Properties:
-     * - Smooth everywhere (infinitely differentiable)
-     * - Approaches max(0, x) as k -> infinity
-     * - k=20 is a good balance between smoothness and accuracy
-     * 
      * @param x Input symbolic expression
      * @param k Sharpness parameter (higher = closer to max, but less smooth)
      * @return Smooth approximation of max(0, x)
      */
     static casadi::SX softplus(const casadi::SX& x, double k = 20.0) {
         using namespace casadi;
-        // Numerically stable: for large x, softplus(x) ≈ x
         return if_else(x > 10.0/k, x, log(1.0 + exp(k * x)) / k);
     }
     
     /**
-     * @brief Smooth max using polynomial transition (very smooth)
-     * 
-     * For x < 0: returns 0
-     * For x > d: returns x - d/2  
-     * For 0 <= x <= d: returns x^2/(2d) (smooth quadratic transition)
-     * 
-     * @param x Input symbolic expression
-     * @param d Transition width (smaller = sharper)
+     * @brief Smooth max using polynomial transition
      */
     static casadi::SX smoothReluPoly(const casadi::SX& x, double d = 0.5) {
         using namespace casadi;
@@ -63,32 +49,39 @@ public:
                if_else(x > d, x - d/2, x*x/(2*d)));
     }
     
+    // ==================== R-Matrix Conversion ====================
+    
     /**
-     * @brief Smooth max using sqrt-based formula
+     * @brief Convert Eigen sparse R-matrix to CasADi DM
      * 
-     * smooth_relu(x) = (sqrt(x^2 + eps) + x) / 2
-     * 
-     * @param x Input symbolic expression
-     * @param eps Smoothing parameter
+     * Use this to convert MotionPlanner's R_matrix_ for use in CasADi.
+     * This ensures the symbolic smoothness cost matches computeSmoothnessCost().
      */
-    static casadi::SX smoothReluSqrt(const casadi::SX& x, double eps = 0.1) {
-        using namespace casadi;
-        return (sqrt(x*x + eps) + x) / 2.0;
+    static casadi::DM sparseRMatrixToDM(const SparseMatrixXf& R_sparse) {
+        size_t n = R_sparse.rows();
+        casadi::DM R(n, n);
+        
+        // Fill with zeros first
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                R(i, j) = 0.0;
+            }
+        }
+        
+        // Copy non-zero entries
+        for (int k = 0; k < R_sparse.outerSize(); ++k) {
+            for (SparseMatrixXf::InnerIterator it(R_sparse, k); it; ++it) {
+                R(it.row(), it.col()) = static_cast<double>(it.value());
+            }
+        }
+        
+        return R;
     }
     
     // ==================== Symbolic Cost Builders ====================
     
     /**
      * @brief Build symbolic collision cost for a single 2D/3D position
-     * 
-     * @param pos_x X coordinate (symbolic)
-     * @param pos_y Y coordinate (symbolic)
-     * @param pos_z Z coordinate (symbolic, ignored if 2D)
-     * @param obs_soa Obstacle data in SoA format
-     * @param epsilon_sdf SDF margin
-     * @param sigma_obs Cost weight
-     * @param scale Optional scaling factor
-     * @return Symbolic collision cost for this position
      */
     static casadi::SX buildPositionCost(
         const casadi::SX& pos_x,
@@ -118,13 +111,9 @@ public:
                 dist_sq += dz*dz;
             }
             
-            // Add small epsilon to avoid gradient singularity at zero distance
             SX dist = sqrt(dist_sq + 1e-6);
-            
             double combined_r = static_cast<double>(obs_soa.combined_radii(k));
             SX sdf = dist - combined_r;
-            
-            // Smooth hinge: softplus(epsilon - sdf)^2
             SX hinge = softplus(epsilon_sdf - sdf);
             cost += hinge * hinge;
         }
@@ -135,14 +124,9 @@ public:
     /**
      * @brief Build symbolic collision cost for entire trajectory
      * 
-     * @param Y Decision variables: flattened trajectory [(N-2) * D]
-     * @param N Total number of trajectory nodes
-     * @param D Number of dimensions (2 or 3)
-     * @param obs_soa Obstacle data
-     * @param epsilon_sdf SDF margin
-     * @param sigma_obs Cost weight
-     * @param scale Optional scaling factor
-     * @return Symbolic collision cost expression
+     * @param Y Decision variables (interior nodes only, flattened as [x0,y0,x1,y1,...])
+     * @param N Total number of nodes (including fixed endpoints)
+     * @param D Number of dimensions
      */
     static casadi::SX buildTrajectoryCost(
         const casadi::SX& Y,
@@ -158,7 +142,7 @@ public:
         
         SX total_cost = 0;
         
-        // Process interior nodes (skip fixed endpoints)
+        // Interior nodes only (indices 1 to N-2)
         for (size_t i = 1; i < N - 1; ++i) {
             size_t idx = (i - 1) * D;
             
@@ -174,73 +158,87 @@ public:
     }
     
     /**
-     * @brief Build symbolic smoothness cost (acceleration squared)
+     * @brief Build symbolic smoothness cost using provided R-matrix
      * 
-     * @param Y Decision variables
-     * @param N Number of nodes
+     * Computes: sum_d(Y_d^T * R * Y_d) / scale_sq
+     * 
+     * To match MotionPlanner::computeSmoothnessCost():
+     * 1. Pass R_matrix from MotionPlanner (converted via sparseRMatrixToDM)
+     * 2. Pass normalize_scale = max absolute position value from trajectory
+     * 
+     * @param Y Decision variables (interior nodes, flattened)
+     * @param N Total number of nodes  
      * @param D Number of dimensions
-     * @param start_pos Start position (fixed)
-     * @param goal_pos Goal position (fixed)
-     * @param total_time Total trajectory time
-     * @param scale Optional scaling factor
-     * @return Symbolic smoothness cost
+     * @param start_pos Fixed start position
+     * @param goal_pos Fixed goal position
+     * @param R_matrix R matrix from MotionPlanner (use sparseRMatrixToDM to convert)
+     * @param normalize_scale Max absolute position for normalization (0 = no normalization)
+     * @param obj_scale Additional objective scaling
      */
     static casadi::SX buildSmoothnessCost(
         const casadi::SX& Y,
         size_t N, size_t D,
         const VectorXf& start_pos,
         const VectorXf& goal_pos,
-        float total_time,
-        double scale = 1.0) 
+        const casadi::DM& R_matrix,
+        double normalize_scale = 0.0,
+        double obj_scale = 1.0) 
     {
         using namespace casadi;
         
-        // Build full trajectory
-        std::vector<SX> traj(N * D);
-        
-        for (size_t d = 0; d < D; ++d)
-            traj[d] = static_cast<double>(start_pos(d));
-        
-        for (size_t i = 0; i < N - 2; ++i)
-            for (size_t d = 0; d < D; ++d)
-                traj[(i + 1) * D + d] = Y(i * D + d);
-        
-        for (size_t d = 0; d < D; ++d)
-            traj[(N - 1) * D + d] = static_cast<double>(goal_pos(d));
-        
-        float dt = total_time / (N - 1);
         SX cost = 0;
         
-        for (size_t i = 1; i < N - 1; ++i) {
-            for (size_t d = 0; d < D; ++d) {
-                SX y_prev = traj[(i - 1) * D + d];
-                SX y_curr = traj[i * D + d];
-                SX y_next = traj[(i + 1) * D + d];
-                SX accel = (y_prev - 2*y_curr + y_next) / (dt * dt);
-                cost += accel * accel;
+        // Process each dimension: Y_d^T * R * Y_d
+        for (size_t d = 0; d < D; ++d) {
+            // Build full trajectory vector for this dimension
+            SX Y_d = SX::zeros(N, 1);
+            
+            // Start (fixed)
+            Y_d(0) = static_cast<double>(start_pos(d));
+            
+            // Interior nodes (decision variables)
+            for (size_t i = 0; i < N - 2; ++i) {
+                Y_d(i + 1) = Y(i * D + d);
             }
+            
+            // Goal (fixed)
+            Y_d(N - 1) = static_cast<double>(goal_pos(d));
+            
+            // Y_d^T * R * Y_d
+            SX R_sx = SX(R_matrix);
+            SX RY = mtimes(R_sx, Y_d);
+            
+            cost += mtimes(Y_d.T(), RY);
         }
         
-        return scale * cost;
+        // Apply normalization (matches MotionPlanner::computeSmoothnessCost)
+        if (normalize_scale > 0) {
+            double scale_sq = std::max(normalize_scale * normalize_scale, 1e-6);
+            cost = cost / scale_sq;
+        }
+        
+        return obj_scale * cost;
     }
     
     /**
-     * @brief Build combined cost (smoothness + collision)
+     * @brief Build total cost (smoothness + collision)
      */
     static casadi::SX buildTotalCost(
         const casadi::SX& Y,
         size_t N, size_t D,
         const VectorXf& start_pos,
         const VectorXf& goal_pos,
-        float total_time,
+        const casadi::DM& R_matrix,
         const ObstacleDataSoA& obs_soa,
         float epsilon_sdf,
         float sigma_obs,
         float collision_weight,
-        double scale = 1.0) 
+        double normalize_scale = 0.0,
+        double obj_scale = 1.0) 
     {
-        casadi::SX smooth = buildSmoothnessCost(Y, N, D, start_pos, goal_pos, total_time, scale);
-        casadi::SX coll = buildTrajectoryCost(Y, N, D, obs_soa, epsilon_sdf, sigma_obs, scale);
+        casadi::SX smooth = buildSmoothnessCost(Y, N, D, start_pos, goal_pos, 
+                                                 R_matrix, normalize_scale, obj_scale);
+        casadi::SX coll = buildTrajectoryCost(Y, N, D, obs_soa, epsilon_sdf, sigma_obs, obj_scale);
         return smooth + collision_weight * coll;
     }
     
@@ -266,71 +264,68 @@ public:
         
         return Function("coll_cost", {Y}, {cost, grad}, {"Y"}, {"cost", "grad"});
     }
-    
-    /**
-     * @brief Create CasADi Function for total cost + gradient
-     */
-    static casadi::Function createTotalCostFunction(
-        size_t N, size_t D,
-        const VectorXf& start_pos,
-        const VectorXf& goal_pos,
-        float total_time,
-        const ObstacleDataSoA& obs_soa,
-        float epsilon_sdf,
-        float sigma_obs,
-        float collision_weight,
-        double scale = 1.0) 
-    {
-        using namespace casadi;
-        
-        size_t n_vars = (N - 2) * D;
-        SX Y = SX::sym("Y", n_vars);
-        
-        SX cost = buildTotalCost(Y, N, D, start_pos, goal_pos, total_time,
-                                 obs_soa, epsilon_sdf, sigma_obs, collision_weight, scale);
-        SX grad = gradient(cost, Y);
-        
-        return Function("total_cost", {Y}, {cost, grad}, {"Y"}, {"cost", "grad"});
-    }
-    
-    /**
-     * @brief Create CasADi NLP dictionary for direct use with nlpsol
-     */
-    static casadi::SXDict createNLP(
-        size_t N, size_t D,
-        const VectorXf& start_pos,
-        const VectorXf& goal_pos,
-        float total_time,
-        const ObstacleDataSoA& obs_soa,
-        float epsilon_sdf,
-        float sigma_obs,
-        float collision_weight,
-        double scale = 1.0) 
-    {
-        using namespace casadi;
-        
-        size_t n_vars = (N - 2) * D;
-        SX Y = SX::sym("Y", n_vars);
-        
-        SX cost = buildTotalCost(Y, N, D, start_pos, goal_pos, total_time,
-                                 obs_soa, epsilon_sdf, sigma_obs, collision_weight, scale);
-        
-        return {{"x", Y}, {"f", cost}};
-    }
 };
 
 
 /**
  * @brief Wrapper class that extends CollisionAvoidanceTask with CasADi support
- * 
- * Provides convenient methods to create CasADi cost functions from task parameters.
  */
 class CasadiCollisionTask : public CollisionAvoidanceTask {
 public:
     using CollisionAvoidanceTask::CollisionAvoidanceTask;
     
     /**
-     * @brief Create collision cost function from task parameters
+     * @brief Build symbolic collision cost
+     */
+    casadi::SX buildCollisionCostSymbolic(
+        const casadi::SX& Y, 
+        size_t N, 
+        double scale = 1.0) const 
+    {
+        return CasadiCollisionCost::buildTrajectoryCost(
+            Y, N, num_dimensions_, obs_soa_, epsilon_sdf_, sigma_obs_, scale);
+    }
+    
+    /**
+     * @brief Build symbolic smoothness cost using provided R-matrix
+     * 
+     * @param Y Decision variables
+     * @param N Number of nodes
+     * @param R_matrix R matrix from MotionPlanner (use getRMatrixDM() to convert)
+     * @param normalize_scale Max position scale for normalization
+     * @param obj_scale Objective scaling
+     */
+    casadi::SX buildSmoothnessCostSymbolic(
+        const casadi::SX& Y,
+        size_t N,
+        const casadi::DM& R_matrix,
+        double normalize_scale = 0.0,
+        double obj_scale = 1.0) const 
+    {
+        return CasadiCollisionCost::buildSmoothnessCost(
+            Y, N, num_dimensions_, start_node_.position, goal_node_.position,
+            R_matrix, normalize_scale, obj_scale);
+    }
+    
+    /**
+     * @brief Build symbolic total cost
+     */
+    casadi::SX buildTotalCostSymbolic(
+        const casadi::SX& Y,
+        size_t N,
+        const casadi::DM& R_matrix,
+        float collision_weight,
+        double normalize_scale = 0.0,
+        double obj_scale = 1.0) const 
+    {
+        return CasadiCollisionCost::buildTotalCost(
+            Y, N, num_dimensions_, start_node_.position, goal_node_.position,
+            R_matrix, obs_soa_, epsilon_sdf_, sigma_obs_, collision_weight,
+            normalize_scale, obj_scale);
+    }
+    
+    /**
+     * @brief Create collision cost function
      */
     casadi::Function createCollisionCostFunction(size_t N, double scale = 1.0) const {
         return CasadiCollisionCost::createCollisionCostFunction(
@@ -338,47 +333,10 @@ public:
     }
     
     /**
-     * @brief Create total cost function from task parameters
+     * @brief Convert sparse R-matrix to CasADi DM
      */
-    casadi::Function createTotalCostFunction(size_t N, float collision_weight, double scale = 1.0) const {
-        return CasadiCollisionCost::createTotalCostFunction(
-            N, num_dimensions_, start_node_.position, goal_node_.position, total_time_,
-            obs_soa_, epsilon_sdf_, sigma_obs_, collision_weight, scale);
-    }
-    
-    /**
-     * @brief Create NLP for direct use with IPOPT/SQP
-     */
-    casadi::SXDict createNLP(size_t N, float collision_weight, double scale = 1.0) const {
-        return CasadiCollisionCost::createNLP(
-            N, num_dimensions_, start_node_.position, goal_node_.position, total_time_,
-            obs_soa_, epsilon_sdf_, sigma_obs_, collision_weight, scale);
-    }
-    
-    /**
-     * @brief Build symbolic collision cost for this task
-     */
-    casadi::SX buildCollisionCostSymbolic(const casadi::SX& Y, size_t N, double scale = 1.0) const {
-        return CasadiCollisionCost::buildTrajectoryCost(
-            Y, N, num_dimensions_, obs_soa_, epsilon_sdf_, sigma_obs_, scale);
-    }
-    
-    /**
-     * @brief Build symbolic smoothness cost for this task
-     */
-    casadi::SX buildSmoothnessCostSymbolic(const casadi::SX& Y, size_t N, double scale = 1.0) const {
-        return CasadiCollisionCost::buildSmoothnessCost(
-            Y, N, num_dimensions_, start_node_.position, goal_node_.position, total_time_, scale);
-    }
-    
-    /**
-     * @brief Build symbolic total cost for this task
-     */
-    casadi::SX buildTotalCostSymbolic(const casadi::SX& Y, size_t N, 
-                                       float collision_weight, double scale = 1.0) const {
-        return CasadiCollisionCost::buildTotalCost(
-            Y, N, num_dimensions_, start_node_.position, goal_node_.position, total_time_,
-            obs_soa_, epsilon_sdf_, sigma_obs_, collision_weight, scale);
+    static casadi::DM convertRMatrixToDM(const Eigen::SparseMatrix<float>& R_sparse) {
+        return CasadiCollisionCost::sparseRMatrixToDM(R_sparse);
     }
 };
 

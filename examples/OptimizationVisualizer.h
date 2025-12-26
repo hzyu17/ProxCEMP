@@ -1645,3 +1645,187 @@ private:
         }
     }
 };
+
+// =============================================================================
+// STOMP Visualization Adapter
+// =============================================================================
+// 
+// Converts STOMP planner data structures to OptimizationHistory format
+// for use with OptimizationVisualizer.
+//
+// Usage:
+//   StompMotionPlanner planner(collision_task);
+//   planner.initialize(config);
+//   planner.solve();
+//   
+//   OptimizationHistory history = StompAdapter::convert(planner);
+//   OptimizationVisualizer viz;
+//   viz.showTrajectoryEvolution(obstacle_map, history, "STOMP Optimization");
+// =============================================================================
+
+namespace StompAdapter {
+
+/**
+ * @brief Data for a single STOMP optimization iteration
+ * 
+ * This structure mirrors what StompMotionPlanner stores internally.
+ * If you're using StompMotionPlanner directly, you can use its native types.
+ */
+struct StompIterationData {
+    std::vector<Trajectory> samples;    // Noisy rollouts for this iteration
+    Trajectory mean_trajectory;          // Mean/updated trajectory
+    float cost = 0.0f;
+    float collision_cost = 0.0f;
+    float smoothness_cost = 0.0f;
+    int iteration_number = 0;
+};
+
+/**
+ * @brief Complete STOMP optimization history
+ */
+struct StompOptimizationHistory {
+    std::vector<StompIterationData> iterations;
+    
+    size_t size() const { return iterations.size(); }
+    bool empty() const { return iterations.empty(); }
+};
+
+/**
+ * @brief Convert STOMP iteration data to visualization IterationData
+ */
+inline IterationData convertIteration(const StompIterationData& stomp_iter) {
+    IterationData iter_data;
+    
+    iter_data.iteration = stomp_iter.iteration_number;
+    iter_data.mean_trajectory = stomp_iter.mean_trajectory;
+    iter_data.samples = stomp_iter.samples;
+    iter_data.total_cost = stomp_iter.cost;
+    iter_data.collision_cost = stomp_iter.collision_cost;
+    iter_data.smoothness_cost = stomp_iter.smoothness_cost;
+    
+    return iter_data;
+}
+
+/**
+ * @brief Convert complete STOMP history to OptimizationHistory
+ * 
+ * @param stomp_history The STOMP planner's optimization history
+ * @return OptimizationHistory compatible with OptimizationVisualizer
+ */
+inline OptimizationHistory convert(const StompOptimizationHistory& stomp_history) {
+    OptimizationHistory vis_history;
+    
+    for (const auto& stomp_iter : stomp_history.iterations) {
+        vis_history.addIteration(convertIteration(stomp_iter));
+    }
+    
+    return vis_history;
+}
+
+/**
+ * @brief Convert trajectory history (mean only) to OptimizationHistory
+ * 
+ * Use this when you only have the mean trajectories without samples.
+ * 
+ * @param trajectories Vector of mean trajectories per iteration
+ * @param costs Optional vector of costs per iteration
+ * @return OptimizationHistory compatible with OptimizationVisualizer
+ */
+inline OptimizationHistory convertTrajectoryHistory(
+    const std::vector<Trajectory>& trajectories,
+    const std::vector<float>& costs = {}) 
+{
+    OptimizationHistory vis_history;
+    
+    for (size_t i = 0; i < trajectories.size(); ++i) {
+        IterationData iter_data;
+        iter_data.iteration = static_cast<int>(i);
+        iter_data.mean_trajectory = trajectories[i];
+        iter_data.total_cost = (i < costs.size()) ? costs[i] : 0.0f;
+        // samples left empty - visualization will just show means
+        vis_history.addIteration(iter_data);
+    }
+    
+    return vis_history;
+}
+
+/**
+ * @brief Builder class for constructing OptimizationHistory from STOMP data
+ * 
+ * Useful when collecting data during optimization:
+ * 
+ *   StompAdapter::HistoryBuilder builder;
+ *   
+ *   // In your optimization loop:
+ *   builder.startIteration(iter_num);
+ *   for (each rollout) {
+ *       builder.addSample(noisy_trajectory);
+ *   }
+ *   builder.finishIteration(mean_trajectory, cost);
+ *   
+ *   // After optimization:
+ *   OptimizationHistory history = builder.build();
+ */
+class HistoryBuilder {
+public:
+    HistoryBuilder() = default;
+    
+    /// Start a new iteration
+    void startIteration(int iteration_number) {
+        current_iteration_.iteration_number = iteration_number;
+        current_iteration_.samples.clear();
+    }
+    
+    /// Add a sample (noisy rollout) to current iteration
+    void addSample(const Trajectory& sample) {
+        current_iteration_.samples.push_back(sample);
+    }
+    
+    /// Add multiple samples at once
+    void addSamples(const std::vector<Trajectory>& samples) {
+        current_iteration_.samples.insert(
+            current_iteration_.samples.end(), 
+            samples.begin(), 
+            samples.end()
+        );
+    }
+    
+    /// Finish current iteration with mean trajectory and costs
+    void finishIteration(const Trajectory& mean_trajectory, 
+                         float total_cost,
+                         float collision_cost = 0.0f,
+                         float smoothness_cost = 0.0f) {
+        current_iteration_.mean_trajectory = mean_trajectory;
+        current_iteration_.cost = total_cost;
+        current_iteration_.collision_cost = collision_cost;
+        current_iteration_.smoothness_cost = smoothness_cost;
+        
+        stomp_history_.iterations.push_back(std::move(current_iteration_));
+        current_iteration_ = StompIterationData{};
+    }
+    
+    /// Build the final OptimizationHistory
+    OptimizationHistory build() const {
+        return convert(stomp_history_);
+    }
+    
+    /// Get the raw STOMP history
+    const StompOptimizationHistory& getStompHistory() const {
+        return stomp_history_;
+    }
+    
+    /// Clear all data
+    void clear() {
+        stomp_history_.iterations.clear();
+        current_iteration_ = StompIterationData{};
+    }
+    
+    /// Get number of iterations collected
+    size_t size() const { return stomp_history_.size(); }
+
+private:
+    StompOptimizationHistory stomp_history_;
+    StompIterationData current_iteration_;
+};
+
+} // namespace StompAdapter

@@ -24,7 +24,7 @@ int main() {
 
     // Define solvers to test
     // Note: "sqp" requires qpoases library, exclude if not available
-    std::vector<std::string> casadi_solvers = {"lbfgs", "ipopt", "gd", "adam"};
+    std::vector<std::string> casadi_solvers = {"ipopt", "gd", "adam", "lbfgs"};
 
     // Store results for each solver
     std::map<std::string, OptimizationHistory> casadi_histories;
@@ -76,9 +76,9 @@ int main() {
             IterationData init_data;
             init_data.iteration = 0;
             init_data.mean_trajectory = planner->getCurrentTrajectory();
-            init_data.total_cost = task->computeStateCost(init_data.mean_trajectory);
-            init_data.collision_cost = init_data.total_cost;
-            init_data.smoothness_cost = 0.0f;
+            init_data.collision_cost = task->computeStateCost(init_data.mean_trajectory);
+            init_data.smoothness_cost = planner->computeSmoothnessCost(init_data.mean_trajectory);
+            init_data.total_cost = init_data.collision_cost + init_data.smoothness_cost;
             history.addIteration(init_data);
         }
 
@@ -93,14 +93,16 @@ int main() {
             IterationData iter_data;
             iter_data.iteration = i;
             iter_data.mean_trajectory = traj_history[i];
-            iter_data.total_cost = task->computeStateCost(traj_history[i]);
-            iter_data.collision_cost = iter_data.total_cost;
-            iter_data.smoothness_cost = 0.0f;
+            iter_data.collision_cost = task->computeStateCost(traj_history[i]);
+            iter_data.smoothness_cost = planner->computeSmoothnessCost(traj_history[i]);
+            iter_data.total_cost = iter_data.collision_cost + iter_data.smoothness_cost;
             history.addIteration(iter_data);
         }
 
         history.final_trajectory = planner->getCurrentTrajectory();
-        history.final_cost = task->computeStateCost(history.final_trajectory);
+        float final_collision = task->computeStateCost(history.final_trajectory);
+        float final_smoothness = planner->computeSmoothnessCost(history.final_trajectory);
+        history.final_cost = final_collision + final_smoothness;
         history.converged = success;
         history.total_iterations = traj_history.size();
         casadi_histories[solver_name] = history;
@@ -147,22 +149,23 @@ int main() {
     std::cout << "   CasADi Results Summary\n";
     std::cout << "=================================================\n";
 
-    // Use first task for consistent evaluation
+    // Use first task/planner for consistent evaluation
     auto ref_task = casadi_tasks.begin()->second;
     auto ref_planner = casadi_planners.begin()->second;
 
     auto evaluate_final = [&](const Trajectory& traj) {
         float collision = ref_task->computeStateCost(traj);
         float smoothness = ref_planner->computeSmoothnessCost(traj);
-        return std::make_pair(collision + smoothness, collision);
+        return std::make_tuple(collision + smoothness, collision, smoothness);
     };
 
     std::cout << std::left << std::setw(18) << "Planner"
               << std::setw(12) << "Status"
               << std::setw(10) << "Iters"
               << std::setw(15) << "Total Cost"
-              << "Collision Cost\n";
-    std::cout << std::string(70, '-') << "\n";
+              << std::setw(15) << "Collision"
+              << "Smoothness\n";
+    std::cout << std::string(85, '-') << "\n";
 
     std::string best_planner;
     float best_cost = std::numeric_limits<float>::max();
@@ -170,7 +173,7 @@ int main() {
     for (const auto& solver_name : casadi_solvers) {
         if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
 
-        auto final_res = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
+        auto [total, collision, smoothness] = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
         const auto& history = casadi_histories[solver_name];
         bool success = casadi_success[solver_name];
 
@@ -178,16 +181,17 @@ int main() {
         std::cout << std::left << std::setw(18) << planner_name
                   << std::setw(12) << (success ? "SUCCESS" : "FAILED")
                   << std::setw(10) << history.total_iterations
-                  << std::setw(15) << final_res.first
-                  << final_res.second << "\n";
+                  << std::setw(15) << total
+                  << std::setw(15) << collision
+                  << smoothness << "\n";
 
-        if (final_res.first < best_cost && !std::isnan(final_res.first)) {
-            best_cost = final_res.first;
+        if (total < best_cost && !std::isnan(total)) {
+            best_cost = total;
             best_planner = planner_name;
         }
     }
 
-    std::cout << std::string(70, '-') << "\n";
+    std::cout << std::string(85, '-') << "\n";
     std::cout << "\n★ Best result: " << best_planner << " with total cost = " << best_cost << "\n";
     std::cout << "\n=================================================\n";
 

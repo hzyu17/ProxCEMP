@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(PCEMotionPlanner VERSION 1.0.0 LANGUAGES CXX)
 
-# Set C++ standard
+# =============================================================================
+# Build Configuration
+# =============================================================================
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(BUILD_SHARED_LIBS OFF)
@@ -11,39 +13,61 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Compiler flags
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+# =============================================================================
+# Options
+# =============================================================================
+# ASan for STOMP/PCE/NGD (NOT for CasADi - incompatible with IPOPT)
+option(ENABLE_STOMP_ASAN "Enable Address Sanitizer for STOMP library and executables" OFF)
 
-# Optional: Enable ASan for debugging (disabled by default)
-option(ENABLE_ASAN "Enable Address Sanitizer" OFF)
-if(ENABLE_ASAN)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+message(STATUS "")
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "STOMP ASan enabled: ${ENABLE_STOMP_ASAN}")
+
+# =============================================================================
+# Compiler Flags - Set BEFORE add_subdirectory(external/stomp)
+# =============================================================================
+# This ensures the stomp library itself gets compiled with ASan when enabled
+if(ENABLE_STOMP_ASAN)
+    # ASan flags for stomp library and STOMP executables
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -g")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
+    message(STATUS "ASan enabled globally for stomp library")
+else()
+    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 endif()
 
+# =============================================================================
+# Subdirectories - stomp MUST come first to get ASan flags
+# =============================================================================
 add_subdirectory(external/stomp)
+
+# Examples comes after - it will handle CasADi targets specially
 add_subdirectory(Examples2d3d)
 
-# Find dependencies
+# =============================================================================
+# Find Dependencies
+# =============================================================================
 find_package(Eigen3 REQUIRED)
 find_package(CASADI REQUIRED)
 find_package(OpenMP REQUIRED)
 
-# Include Casadi headers
+# Include CasADi headers
 include_directories(${CASADI_INCLUDE_DIRS})
 
-# Define header-only library interface
+# =============================================================================
+# Header-Only Library Interface
+# =============================================================================
 add_library(pce_motion_planner INTERFACE)
 
-# Specify include directories for the library
 target_include_directories(pce_motion_planner INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/examples>
     $<INSTALL_INTERFACE:include>
     ${CASADI_INCLUDE_DIRS}
 )
 
-# Link Eigen3
 target_link_libraries(pce_motion_planner INTERFACE 
     Eigen3::Eigen 
     ${CASADI_LIBRARIES} 
@@ -51,7 +75,9 @@ target_link_libraries(pce_motion_planner INTERFACE
     stomp
 )
 
-# Installation rules
+# =============================================================================
+# Installation Rules
+# =============================================================================
 include(GNUInstallDirs)
 
 # Install header files
@@ -98,3 +124,21 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PCEMotionPlannerConfigVersion.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/PCEMotionPlanner
 )
+
+# =============================================================================
+# Summary
+# =============================================================================
+message(STATUS "")
+message(STATUS "=== PCEMotionPlanner Configuration ===")
+message(STATUS "  Build type:        ${CMAKE_BUILD_TYPE}")
+message(STATUS "  STOMP ASan:        ${ENABLE_STOMP_ASAN}")
+message(STATUS "  CasADi ASan:       OFF (incompatible with IPOPT plugin)")
+message(STATUS "")
+if(ENABLE_STOMP_ASAN)
+    message(STATUS "NOTE: stomp library compiled WITH ASan")
+    message(STATUS "NOTE: main_casadi compiled WITHOUT ASan (special handling)")
+    message(STATUS "NOTE: All other executables compiled WITH ASan")
+else()
+    message(STATUS "NOTE: All targets compiled WITHOUT ASan")
+endif()
+message(STATUS "")

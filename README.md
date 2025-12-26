@@ -63,6 +63,11 @@ cd ProxCEMP && mkdir build && cd build
 cmake .. && make && sudo make install
 ```
 
+#### For STOMP planner: an additional requirement for ASAN. Use the following flag:
+```
+cmake -DENABLE_STOMP_ASAN=ON ..
+```
+
 ### macOS
 
 ```bash

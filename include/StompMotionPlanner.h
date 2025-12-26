@@ -1,8 +1,11 @@
 /**
  * @file StompMotionPlanner.h
- * @brief STOMP-based motion planner wrapper
+ * @brief STOMP-based motion planner wrapper (Refactored for visualization consistency)
  * 
- * All optimization state lives here; StompCollisionTask is a thin stateless wrapper.
+ * Modified to match PCEMotionPlanner's data storage patterns:
+ * - Stores samples per iteration for visualization
+ * - Uses trajectory_history_ naming convention
+ * - Provides OptimizationHistory-compatible interface
  */
 #pragma once
 
@@ -18,7 +21,33 @@
 namespace pce {
 
 /**
+ * @brief Data for a single optimization iteration (matches PCE visualization format)
+ */
+struct StompIterationData {
+    std::vector<Trajectory> samples;    // Noisy rollouts for this iteration
+    Trajectory mean_trajectory;          // Mean/updated trajectory
+    float cost = 0.0f;
+    int iteration_number = 0;
+};
+
+/**
+ * @brief Complete optimization history (compatible with visualization)
+ */
+struct StompOptimizationHistory {
+    std::vector<StompIterationData> iterations;
+    
+    // Convenience accessors matching OptimizationHistory interface
+    size_t size() const { return iterations.size(); }
+    bool empty() const { return iterations.empty(); }
+};
+
+/**
  * @brief STOMP Motion Planner - holds all optimization state
+ * 
+ * Refactored to be consistent with PCEMotionPlanner:
+ * - Stores sample trajectories per iteration
+ * - Provides trajectory_history_ style interface
+ * - Compatible with showTrajectoryEvolution visualization
  */
 class StompMotionPlanner {
 public:
@@ -117,8 +146,18 @@ public:
         
         std::cout << "\n=== Running STOMP Optimization ===\n";
         
-        iteration_trajectories_.clear();
-        iteration_trajectories_.push_back(current_trajectory_);
+        // Clear history and prepare for new optimization
+        optimization_history_.iterations.clear();
+        trajectory_history_.clear();
+        current_iteration_samples_.clear();
+        
+        // Store initial trajectory as iteration 0
+        StompIterationData initial_data;
+        initial_data.mean_trajectory = current_trajectory_;
+        initial_data.iteration_number = 0;
+        initial_data.cost = 0.0f;
+        optimization_history_.iterations.push_back(initial_data);
+        trajectory_history_.push_back(current_trajectory_);
         
         VectorXd start(config_.num_dimensions);
         VectorXd goal(config_.num_dimensions);
@@ -149,6 +188,7 @@ public:
     bool taskGenerateNoisyParameters(const MatrixXd& parameters,
                                      std::size_t num_timesteps,
                                      int iteration_number,
+                                     int rollout_number,
                                      MatrixXd& parameters_noise,
                                      MatrixXd& noise) 
     {
@@ -169,11 +209,19 @@ public:
         }
         
         parameters_noise = parameters + noise;
+        
+        // Store this sample for visualization (like PCE stores sample_trajectories)
+        if (rollout_number >= 0) {
+            Trajectory sample_traj = matrixToTrajectory(parameters_noise);
+            current_iteration_samples_.push_back(sample_traj);
+        }
+        
         return true;
     }
     
     bool taskComputeCosts(const MatrixXd& parameters,
                           std::size_t num_timesteps,
+                          int rollout_number,
                           VectorXd& costs,
                           bool& validity) 
     {
@@ -214,11 +262,25 @@ public:
     void taskPostIteration(int iteration_number, double cost, const MatrixXd& parameters) {
         current_iteration_ = iteration_number;
         
-        Trajectory traj = matrixToTrajectory(parameters);
-        iteration_trajectories_.push_back(traj);
+        Trajectory mean_traj = matrixToTrajectory(parameters);
+        
+        // Store iteration data with samples (like PCE's trajectory_history_)
+        StompIterationData iter_data;
+        iter_data.samples = std::move(current_iteration_samples_);
+        iter_data.mean_trajectory = mean_traj;
+        iter_data.cost = static_cast<float>(cost);
+        iter_data.iteration_number = iteration_number;
+        
+        optimization_history_.iterations.push_back(iter_data);
+        trajectory_history_.push_back(mean_traj);
+        
+        // Clear for next iteration
+        current_iteration_samples_.clear();
         
         if (iteration_number % 10 == 0) {
-            std::cout << "  STOMP Iteration " << iteration_number << ": cost = " << cost << "\n";
+            std::cout << "  STOMP Iteration " << iteration_number 
+                      << ": cost = " << cost 
+                      << ", samples = " << iter_data.samples.size() << "\n";
         }
     }
     
@@ -230,11 +292,28 @@ public:
         final_cost_ = static_cast<float>(final_cost);
     }
     
-    // ==================== Accessors ====================
+    // ==================== Accessors (consistent with PCE interface) ====================
     
     const Trajectory& getCurrentTrajectory() const { return current_trajectory_; }
-    const std::vector<Trajectory>& getTrajectoryHistory() const { return iteration_trajectories_; }
+    
+    /** @brief Get trajectory history (mean trajectories, like PCE's trajectory_history_) */
+    const std::vector<Trajectory>& getTrajectoryHistory() const { 
+        return trajectory_history_; 
+    }
+    
+    /** @brief Get full optimization history with samples (for visualization) */
+    const StompOptimizationHistory& getOptimizationHistory() const { 
+        return optimization_history_; 
+    }
+    
+    /** @brief Get number of iterations completed */
+    size_t getNumIterations() const { 
+        return optimization_history_.iterations.size(); 
+    }
+    
     bool isInitialized() const { return initialized_; }
+    bool hasConverged() const { return converged_; }
+    float getFinalCost() const { return final_cost_; }
     
     float computeSmoothnessCost(const Trajectory& trajectory) const {
         if (trajectory.nodes.size() < 3) return 0.0f;
@@ -298,9 +377,12 @@ private:
     std::mt19937 rng_;
     int current_iteration_;
     
-    // Results
+    // Results - consistent with PCE naming
     Trajectory current_trajectory_;
-    std::vector<Trajectory> iteration_trajectories_;
+    std::vector<Trajectory> trajectory_history_;              // Mean trajectories (like PCE)
+    StompOptimizationHistory optimization_history_;           // Full history with samples
+    std::vector<Trajectory> current_iteration_samples_;       // Temp storage during iteration
+    
     float final_cost_;
     bool converged_;
     bool initialized_;
@@ -319,7 +401,7 @@ inline bool StompCollisionTask::generateNoisyParameters(
 {
     if (!planner_) return false;
     return planner_->taskGenerateNoisyParameters(parameters, num_timesteps, iteration_number, 
-                                                  parameters_noise, noise);
+                                                  rollout_number, parameters_noise, noise);
 }
 
 inline bool StompCollisionTask::computeNoisyCosts(
@@ -336,7 +418,7 @@ inline bool StompCollisionTask::computeNoisyCosts(
         validity = true;
         return true;
     }
-    return planner_->taskComputeCosts(parameters, num_timesteps, costs, validity);
+    return planner_->taskComputeCosts(parameters, num_timesteps, rollout_number, costs, validity);
 }
 
 inline bool StompCollisionTask::computeCosts(
