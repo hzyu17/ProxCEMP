@@ -6,12 +6,14 @@
  * L-BFGS, IPOPT (with SCP), SQP (with SCP), Gradient Descent, Adam
  * 
  * Uses R-matrix based smoothness cost consistent with MotionPlanner base class.
+ * Uses symbolic collision cost from CasadiCollisionTask for analytical gradients.
  */
 #pragma once
 
 #include "MotionPlanner.h"
 #include "Trajectory.h"
 #include "task.h"
+#include "CasadiCollisionTask.h"  // For symbolic collision cost
 #include <casadi/casadi.hpp>
 #include <Eigen/Dense>
 #include <iostream>
@@ -52,6 +54,7 @@ struct CasADiConfig : public MotionPlannerConfig {
     bool verbose_solver = true;
     std::string solver = "lbfgs";
     CasADiSolverType solver_type = CasADiSolverType::LBFGS;
+    bool use_symbolic_collision = true;  // NEW: Use symbolic collision gradients
     
     // L-BFGS
     size_t lbfgs_history = 10;
@@ -86,7 +89,7 @@ struct CasADiConfig : public MotionPlannerConfig {
     int scp_stall_limit = 10;
     
     // SQP
-    std::string sqp_qp_solver = "qpoases";
+    std::string sqp_qp_solver = "qrqp";  // Built-in CasADi QP solver (no external deps)
     int sqp_max_iter_ls = 20;
     double sqp_beta = 0.5;
     double sqp_c1 = 1e-4;
@@ -124,6 +127,7 @@ public:
             loadParam(c, "finite_diff_eps", finite_diff_eps);
             loadParam(c, "verbose_solver", verbose_solver);
             loadParam(c, "lbfgs_history", lbfgs_history);
+            loadParam(c, "use_symbolic_collision", use_symbolic_collision);
             
             if (c["solver"]) {
                 solver = c["solver"].as<std::string>();
@@ -216,7 +220,8 @@ public:
                   << "Solver: " << solverTypeToString(solver_type) << "\n"
                   << "Max iterations: " << max_iterations << ", Tolerance: " << tolerance << "\n"
                   << "Collision weight: " << collision_weight << ", Finite diff eps: " << finite_diff_eps << "\n"
-                  << "Verbose: " << (verbose_solver ? "yes" : "no") << "\n";
+                  << "Verbose: " << (verbose_solver ? "yes" : "no") << "\n"
+                  << "Use symbolic collision: " << (use_symbolic_collision ? "yes" : "no") << "\n";
         
         switch (solver_type) {
             case CasADiSolverType::LBFGS:
@@ -251,9 +256,15 @@ public:
     using VectorXf = Eigen::VectorXf;
     using SparseMatrixXf = Eigen::SparseMatrix<float>;
     
-    CasADiMotionPlanner(pce::TaskPtr task = nullptr) : task_(task) {}
+    CasADiMotionPlanner(pce::TaskPtr task = nullptr) : task_(task) {
+        // Try to cast to CasadiCollisionTask for symbolic collision support
+        casadi_task_ = std::dynamic_pointer_cast<pce::CasadiCollisionTask>(task);
+    }
     
-    void setTask(pce::TaskPtr task) { task_ = task; }
+    void setTask(pce::TaskPtr task) { 
+        task_ = task; 
+        casadi_task_ = std::dynamic_pointer_cast<pce::CasadiCollisionTask>(task);
+    }
     pce::TaskPtr getTask() const { return task_; }
     
     bool initialize(const CasADiConfig& config) {
@@ -271,6 +282,9 @@ public:
         
         // Compute initial normalization scale (fixed throughout optimization)
         computeNormalizationScale();
+        
+        // Build symbolic cost and gradient functions
+        buildSymbolicFunctions();
         
         return true;
     }
@@ -297,6 +311,8 @@ public:
         
         log("\n--- Starting CasADi Optimization ---");
         logf("Solver: %s", solverTypeToString(cfg_->solver_type).c_str());
+        logf("Using symbolic collision gradients: %s", 
+             (cfg_->use_symbolic_collision && casadi_task_) ? "yes" : "no (finite diff)");
         
         const size_t N = current_trajectory_.nodes.size();
         const size_t D = num_dimensions_;
@@ -369,15 +385,21 @@ protected:
         logf("  Solver: %s, Max iter: %zu, Tol: %.6f", 
              solverTypeToString(cfg_->solver_type).c_str(), cfg_->max_iterations, cfg_->tolerance);
         logf("  Collision weight: %.4f, Finite diff eps: %.6f", cfg_->collision_weight, cfg_->finite_diff_eps);
+        logf("  Symbolic collision: %s", (cfg_->use_symbolic_collision && casadi_task_) ? "yes" : "no");
         log("");
     }
 
 private:
     pce::TaskPtr task_;
+    std::shared_ptr<pce::CasadiCollisionTask> casadi_task_;  // For symbolic collision cost
     std::shared_ptr<CasADiConfig> cfg_;
     casadi::DM R_matrix_dm_;      // R matrix in CasADi format
     double norm_scale_sq_ = 1.0;  // Normalization scale squared (fixed from initial trajectory)
     double norm_scale_ = 1.0;     // Normalization scale
+    
+    // Pre-built symbolic functions
+    casadi::Function total_cost_grad_func_;  // Total cost + gradient function
+    bool symbolic_funcs_built_ = false;
     
     /**
      * @brief Convert inherited R_matrix_ (Eigen sparse) to CasADi DM
@@ -395,9 +417,6 @@ private:
     
     /**
      * @brief Compute normalization scale from initial trajectory
-     * 
-     * This matches MotionPlanner::computeSmoothnessCost() normalization.
-     * We fix this scale at initialization to keep the objective stationary.
      */
     void computeNormalizationScale() {
         float max_abs = 0.0f;
@@ -409,25 +428,63 @@ private:
     }
     
     /**
+     * @brief Build symbolic cost and gradient functions for the optimization
+     * 
+     * Creates a CasADi function that computes:
+     * - Total cost = smoothness_cost + collision_weight * collision_cost
+     * - Gradient of total cost w.r.t. decision variables
+     */
+    void buildSymbolicFunctions() {
+        using namespace casadi;
+        
+        const size_t N = current_trajectory_.nodes.size();
+        const size_t D = num_dimensions_;
+        const size_t n_vars = (N - 2) * D;
+        
+        double obj_scale = cfg_->use_objective_scaling ? cfg_->objective_scale : 1.0;
+        
+        SX Y = SX::sym("Y", n_vars);
+        
+        // Build smoothness cost symbolically
+        SX smooth_cost = buildSmoothnessCostSymbolic(Y, N, D, obj_scale);
+        
+        // Build collision cost symbolically (if CasadiCollisionTask is available)
+        SX coll_cost;
+        if (cfg_->use_symbolic_collision && casadi_task_) {
+            coll_cost = casadi_task_->buildCollisionCostSymbolic(Y, N, obj_scale);
+            log("Built symbolic collision cost function");
+        } else {
+            // Collision will be computed via finite differences
+            coll_cost = SX::zeros(1);
+            log("Using finite difference collision gradients");
+        }
+        
+        // Total cost = smoothness + weight * collision
+        SX total_cost = smooth_cost + cfg_->collision_weight * coll_cost;
+        
+        // Compute gradient symbolically
+        SX grad = gradient(total_cost, Y);
+        
+        // Create function
+        total_cost_grad_func_ = Function("total_cost_grad", {Y}, {total_cost, grad, smooth_cost, coll_cost},
+                                         {"Y"}, {"cost", "grad", "smooth", "coll"});
+        
+        symbolic_funcs_built_ = true;
+        logf("Built symbolic total cost function (n_vars=%zu)", n_vars);
+    }
+    
+    /**
      * @brief Build symbolic smoothness cost using R-matrix (matches MotionPlanner)
      * 
      * Computes: sum_d(Y_d^T * R * Y_d) / norm_scale_sq_
-     * 
-     * @param Y Decision variables (interior nodes, flattened)
-     * @param N Total number of nodes
-     * @param D Number of dimensions
-     * @param obj_scale Additional objective scaling for optimization
      */
     casadi::SX buildSmoothnessCostSymbolic(const casadi::SX& Y, size_t N, size_t D, double obj_scale = 1.0) {
         using namespace casadi;
         
-        // Convert R matrix DM to SX for symbolic operations
         SX R_sx = SX(R_matrix_dm_);
-        
         SX cost = 0;
         
         for (size_t d = 0; d < D; ++d) {
-            // Build full trajectory vector for dimension d
             SX Y_d = SX::zeros(N, 1);
             
             // Start (fixed)
@@ -446,14 +503,14 @@ private:
             cost += mtimes(Y_d.T(), RY);
         }
         
-        // Apply normalization (same as computeSmoothnessCost)
+        // Apply normalization
         cost = cost / norm_scale_sq_;
         
         return cost * obj_scale;
     }
     
     /**
-     * @brief Build gradient function for smoothness cost
+     * @brief Build gradient function for smoothness cost only (fallback)
      */
     casadi::Function buildSmoothnessGradientFunction(size_t N, size_t D, size_t n_vars, double obj_scale = 1.0) {
         using namespace casadi;
@@ -483,7 +540,10 @@ private:
         return traj;
     }
     
-    void computeCollisionGradient(const std::vector<double>& x, std::vector<double>& grad) const {
+    /**
+     * @brief Compute collision gradient via finite differences (fallback when symbolic not available)
+     */
+    void computeCollisionGradientFiniteDiff(const std::vector<double>& x, std::vector<double>& grad) const {
         grad.resize(x.size());
         for (size_t i = 0; i < x.size(); ++i) {
             std::vector<double> xp = x, xm = x;
@@ -495,15 +555,57 @@ private:
     }
     
     /**
-     * @brief Compute smoothness cost using inherited method (for consistency)
+     * @brief Compute total cost and gradient using pre-built symbolic function
+     * 
+     * If symbolic collision is available, uses analytical gradients for both.
+     * Otherwise, uses symbolic smoothness + finite diff collision.
      */
-    double computeTrueSmoothnessFromVector(const std::vector<double>& x) const {
-        Trajectory traj = vectorToTrajectory(x);
-        return computeSmoothnessCost(traj);
+    void computeTotalCostAndGradient(const std::vector<double>& x, 
+                                      double& cost, 
+                                      std::vector<double>& grad,
+                                      double& smooth_cost,
+                                      double& coll_cost) {
+        double obj_scale = cfg_->use_objective_scaling ? cfg_->objective_scale : 1.0;
+        
+        if (cfg_->use_symbolic_collision && casadi_task_ && symbolic_funcs_built_) {
+            // Use fully symbolic function (both smoothness and collision)
+            auto result = total_cost_grad_func_(std::vector<casadi::DM>{casadi::DM(x)});
+            
+            cost = static_cast<double>(result[0].scalar()) / obj_scale;
+            grad = result[1].get_elements();
+            smooth_cost = static_cast<double>(result[2].scalar()) / obj_scale;
+            coll_cost = static_cast<double>(result[3].scalar()) / obj_scale;
+            
+            // Note: gradient is already scaled, but we need to scale it back for consistency
+            // Actually the gradient should stay as is since cost is scaled
+        } else {
+            // Fallback: symbolic smoothness + finite diff collision
+            const size_t N = current_trajectory_.nodes.size();
+            const size_t D = num_dimensions_;
+            const size_t n_vars = (N - 2) * D;
+            
+            auto smooth_func = buildSmoothnessGradientFunction(N, D, n_vars, obj_scale);
+            auto result = smooth_func(std::vector<casadi::DM>{casadi::DM(x)});
+            
+            smooth_cost = static_cast<double>(result[0].scalar()) / obj_scale;
+            auto grad_smooth = result[1].get_elements();
+            
+            // Collision via finite differences
+            coll_cost = task_->computeStateCostSimple(vectorToTrajectory(x));
+            std::vector<double> grad_coll;
+            computeCollisionGradientFiniteDiff(x, grad_coll);
+            
+            cost = smooth_cost + cfg_->collision_weight * coll_cost;
+            
+            grad.resize(x.size());
+            for (size_t i = 0; i < x.size(); ++i) {
+                grad[i] = grad_smooth[i] + cfg_->collision_weight * grad_coll[i] * obj_scale;
+            }
+        }
     }
     
     /**
-     * @brief Compute total cost using inherited computeSmoothnessCost()
+     * @brief Compute TRUE total cost (for verification/logging)
      */
     double computeTrueTotalCost(const std::vector<double>& x) const {
         Trajectory traj = vectorToTrajectory(x);
@@ -521,27 +623,8 @@ private:
         coll = task_->computeStateCostSimple(traj);
     }
     
-    /**
-     * @brief Compute total gradient (smoothness + collision)
-     */
-    void computeTotalGradient(const std::vector<double>& x, std::vector<double>& grad,
-                              const casadi::Function& smooth_grad_func, double obj_scale = 1.0) {
-        // Smoothness gradient from symbolic R-matrix based function
-        auto result = smooth_grad_func(std::vector<casadi::DM>{casadi::DM(x)});
-        auto grad_smooth = result[1].get_elements();
-        
-        // Collision gradient via finite differences
-        std::vector<double> grad_coll;
-        computeCollisionGradient(x, grad_coll);
-        
-        // Combine: grad_total = grad_smooth + weight * grad_coll
-        // Note: grad_smooth already includes obj_scale from the function
-        grad.resize(x.size());
-        for (size_t i = 0; i < x.size(); ++i)
-            grad[i] = grad_smooth[i] + cfg_->collision_weight * grad_coll[i] * obj_scale;
-    }
+    // ==================== Solver Implementations ====================
     
-    // Solver implementations
     bool runIPOPT_SCP(std::vector<double>& x, size_t n_vars, size_t N, size_t D) {
         using namespace casadi;
         log("\nStarting IPOPT with SCP (Trust Region)...\n");
@@ -561,20 +644,38 @@ private:
         logf("Initial cost: %.2f, Trust radius: %.4f", current_cost, trust);
         
         for (int outer = 0; outer < cfg_->scp_max_outer_iter; ++outer) {
+            // Build convex subproblem with BOTH costs
+            SX Y = SX::sym("Y", n_vars);
+            
+            // Smoothness cost (fully symbolic, quadratic - convex)
+            SX smooth_cost = buildSmoothnessCostSymbolic(Y, N, D, obj_scale);
+            
+            // Collision cost - linearized around current point
             double coll_k = task_->computeStateCostSimple(vectorToTrajectory(x_k));
             std::vector<double> grad_coll_k;
-            computeCollisionGradient(x_k, grad_coll_k);
             
-            // Build convex subproblem
-            SX Y = SX::sym("Y", n_vars);
-            SX cost = buildSmoothnessCostSymbolic(Y, N, D, obj_scale);
+            if (cfg_->use_symbolic_collision && casadi_task_) {
+                // Get collision gradient from symbolic function
+                SX Y_temp = SX::sym("Y_temp", n_vars);
+                SX coll_sym = casadi_task_->buildCollisionCostSymbolic(Y_temp, N, obj_scale);
+                Function coll_grad_func = Function("coll_grad", {Y_temp}, {gradient(coll_sym, Y_temp)});
+                auto grad_result = coll_grad_func(std::vector<DM>{DM(x_k)});
+                grad_coll_k = grad_result[0].get_elements();
+                // Unscale the gradient
+                for (auto& g : grad_coll_k) g /= obj_scale;
+            } else {
+                computeCollisionGradientFiniteDiff(x_k, grad_coll_k);
+            }
             
-            // Linearized collision (scaled)
+            // Linearized collision: c(x_k) + grad_c^T * (x - x_k)
             SX lin_coll = coll_k * obj_scale;
             for (size_t i = 0; i < n_vars; ++i)
                 lin_coll += grad_coll_k[i] * obj_scale * (Y(i) - x_k[i]);
-            cost += cfg_->collision_weight * lin_coll;
             
+            // Total cost = smoothness (quadratic) + weight * linearized collision
+            SX cost = smooth_cost + cfg_->collision_weight * lin_coll;
+            
+            // Trust region bounds
             std::vector<double> lbx(n_vars), ubx(n_vars);
             for (size_t i = 0; i < n_vars; ++i) {
                 lbx[i] = x_k[i] - trust;
@@ -606,8 +707,11 @@ private:
             try {
                 solver = nlpsol("solver", "ipopt", SXDict{{"x", Y}, {"f", cost}}, opts);
             } catch (const std::exception& e) {
-                std::cerr << "IPOPT error: " << e.what() << ", falling back to L-BFGS\n";
-                return runLBFGS(x, n_vars, N, D);
+                std::cerr << "\n=== IPOPT Solver Error ===\n";
+                std::cerr << "Error: " << e.what() << "\n";
+                std::cerr << "Make sure IPOPT is properly installed.\n";
+                std::cerr << "========================\n\n";
+                return false;  // Fail explicitly - don't silently fall back
             }
             
             auto result = solver(DMDict{{"x0", DM(x_k)}, {"lbx", DM(lbx)}, {"ubx", DM(ubx)}});
@@ -645,6 +749,9 @@ private:
                 x_k = x_trial;
                 current_cost = actual_cost;
                 
+                // Save trajectory history for visualization (every accepted step)
+                trajectory_history_.push_back(vectorToTrajectory(x_k));
+                
                 if (current_cost < best_cost) {
                     best_cost = current_cost;
                     x_best = x_k;
@@ -679,9 +786,6 @@ private:
                 x = x_best;
                 return true;
             }
-            
-            if (outer % 10 == 0)
-                trajectory_history_.push_back(vectorToTrajectory(x_k));
         }
         
         logf("SCP reached max iterations, total inner: %d", total_inner_iters);
@@ -701,7 +805,17 @@ private:
         for (int outer = 0; outer < cfg_->scp_max_outer_iter; ++outer) {
             double coll_k = task_->computeStateCostSimple(vectorToTrajectory(x_k));
             std::vector<double> grad_coll_k;
-            computeCollisionGradient(x_k, grad_coll_k);
+            
+            if (cfg_->use_symbolic_collision && casadi_task_) {
+                SX Y_temp = SX::sym("Y_temp", n_vars);
+                SX coll_sym = casadi_task_->buildCollisionCostSymbolic(Y_temp, N, obj_scale);
+                Function coll_grad_func = Function("coll_grad", {Y_temp}, {gradient(coll_sym, Y_temp)});
+                auto grad_result = coll_grad_func(std::vector<DM>{DM(x_k)});
+                grad_coll_k = grad_result[0].get_elements();
+                for (auto& g : grad_coll_k) g /= obj_scale;
+            } else {
+                computeCollisionGradientFiniteDiff(x_k, grad_coll_k);
+            }
             
             SX Y = SX::sym("Y", n_vars);
             SX cost = buildSmoothnessCostSymbolic(Y, N, D, obj_scale);
@@ -723,13 +837,48 @@ private:
             opts["print_time"] = false;
             opts["print_iteration"] = cfg_->verbose_solver && (outer % 10 == 0);
             
+            // For nlpsol QP solver, set IPOPT as the NLP solver
+            if (cfg_->sqp_qp_solver == "nlpsol") {
+                opts["qpsol_options.nlpsol"] = "ipopt";
+                opts["qpsol_options.nlpsol_options.ipopt.print_level"] = 0;
+                opts["qpsol_options.nlpsol_options.print_time"] = false;
+            }
+            
             Function solver;
+            std::string qp_solver_used = cfg_->sqp_qp_solver;
+            
             try {
                 solver = nlpsol("solver", "sqpmethod", SXDict{{"x", Y}, {"f", cost}}, opts);
             } catch (const std::exception& e) {
-                std::cerr << "SQP error: " << e.what() << ", falling back to L-BFGS\n";
-                return runLBFGS(x, n_vars, N, D);
+                // If primary QP solver fails, try nlpsol fallback (uses IPOPT)
+                if (cfg_->sqp_qp_solver != "nlpsol") {
+                    log("Primary QP solver failed, trying nlpsol fallback...");
+                    try {
+                        opts["qpsol"] = "nlpsol";
+                        opts["qpsol_options.nlpsol"] = "ipopt";
+                        opts["qpsol_options.nlpsol_options.ipopt.print_level"] = 0;
+                        opts["qpsol_options.nlpsol_options.print_time"] = false;
+                        solver = nlpsol("solver", "sqpmethod", SXDict{{"x", Y}, {"f", cost}}, opts);
+                        qp_solver_used = "nlpsol";
+                        if (outer == 0) log("Using nlpsol (IPOPT) as QP solver");
+                    } catch (const std::exception& e2) {
+                        std::cerr << "\n=== SQP Solver Error ===\n";
+                        std::cerr << "Primary error: " << e.what() << "\n";
+                        std::cerr << "Fallback error: " << e2.what() << "\n";
+                        std::cerr << "Available QP solvers: qrqp (built-in), nlpsol\n";
+                        std::cerr << "External (require installation): qpoases, osqp, hpipm\n";
+                        std::cerr << "========================\n\n";
+                        return false;
+                    }
+                } else {
+                    std::cerr << "\n=== SQP Solver Error ===\n";
+                    std::cerr << "Error: " << e.what() << "\n";
+                    std::cerr << "========================\n\n";
+                    return false;
+                }
             }
+            
+            if (outer == 0) logf("Using QP solver: %s", qp_solver_used.c_str());
             
             auto result = solver(DMDict{{"x0", DM(x_k)}, {"lbx", DM(lbx)}, {"ubx", DM(ubx)}});
             auto x_trial = result.at("x").get_elements();
@@ -756,6 +905,9 @@ private:
                 current_cost = actual_cost;
                 if (ratio >= cfg_->scp_good_ratio)
                     trust = std::min(trust * cfg_->scp_trust_expand, cfg_->scp_trust_region_max);
+                
+                // Save trajectory history for visualization (every accepted step)
+                trajectory_history_.push_back(vectorToTrajectory(x_k));
             } else {
                 trust *= cfg_->scp_trust_shrink;
             }
@@ -769,31 +921,26 @@ private:
     }
     
     bool runLBFGS(std::vector<double>& x, size_t n_vars, size_t N, size_t D) {
-        double obj_scale = cfg_->use_objective_scaling ? cfg_->objective_scale : 1.0;
-        casadi::Function grad_func = buildSmoothnessGradientFunction(N, D, n_vars, obj_scale);
+        log("\nStarting L-BFGS...\n");
         
         std::deque<std::vector<double>> s_hist, y_hist;
         std::deque<double> rho_hist;
         std::vector<double> grad(n_vars), grad_new(n_vars), x_new(n_vars);
         double prev_cost = std::numeric_limits<double>::infinity();
-        
-        log("\nStarting L-BFGS...\n");
+        double smooth_cost, coll_cost;
         
         for (size_t iter = 0; iter < cfg_->max_iterations; ++iter) {
-            // Compute gradient (using R-matrix based smoothness)
-            computeTotalGradient(x, grad, grad_func, obj_scale);
-            
-            // Compute TRUE costs for logging
-            double smooth, coll;
-            computeTrueCosts(x, smooth, coll);
-            double cost = smooth + cfg_->collision_weight * coll;
+            // Compute cost and gradient using unified function
+            double cost;
+            computeTotalCostAndGradient(x, cost, grad, smooth_cost, coll_cost);
             
             double gnorm = 0;
             for (auto g : grad) gnorm += g * g;
             gnorm = std::sqrt(gnorm);
             
             if (cfg_->verbose_solver && (iter % 10 == 0 || iter < 5))
-                logf("Iter %3zu: Cost=%.4f (S=%.4f, C=%.4f), |g|=%.6f", iter, cost, smooth, coll, gnorm);
+                logf("Iter %3zu: Cost=%.4f (S=%.4f, C=%.4f), |g|=%.6f", 
+                     iter, smooth_cost + cfg_->collision_weight * coll_cost, smooth_cost, coll_cost, gnorm);
             
             if (gnorm < cfg_->tolerance) { logf("Converged (grad) at iter %zu", iter); return true; }
             if (iter > 10 && std::abs(prev_cost - cost) < cfg_->tolerance * 0.01) {
@@ -856,7 +1003,8 @@ private:
             for (size_t i = 0; i < n_vars; ++i) s[i] = x_new[i] - x[i];
             
             // Compute new gradient
-            computeTotalGradient(x_new, grad_new, grad_func, obj_scale);
+            double new_cost, new_smooth, new_coll;
+            computeTotalCostAndGradient(x_new, new_cost, grad_new, new_smooth, new_coll);
             
             std::vector<double> y(n_vars);
             double sy = 0;
@@ -884,24 +1032,19 @@ private:
     }
     
     bool runGradientDescent(std::vector<double>& x, size_t n_vars, size_t N, size_t D) {
-        double obj_scale = cfg_->use_objective_scaling ? cfg_->objective_scale : 1.0;
-        casadi::Function grad_func = buildSmoothnessGradientFunction(N, D, n_vars, obj_scale);
         log("\nStarting Gradient Descent...\n");
         
         std::vector<double> vel(n_vars, 0), grad(n_vars);
         double lr = cfg_->gd_learning_rate;
+        double smooth_cost, coll_cost;
         
         for (size_t iter = 0; iter < cfg_->max_iterations; ++iter) {
             std::vector<double> x_eval = x;
             if (cfg_->gd_use_nesterov)
                 for (size_t i = 0; i < n_vars; ++i) x_eval[i] = x[i] + cfg_->gd_momentum * vel[i];
             
-            computeTotalGradient(x_eval, grad, grad_func, obj_scale);
-            
-            // TRUE cost for logging
-            double smooth, coll;
-            computeTrueCosts(x, smooth, coll);
-            double cost = smooth + cfg_->collision_weight * coll;
+            double cost;
+            computeTotalCostAndGradient(x_eval, cost, grad, smooth_cost, coll_cost);
             
             double gnorm = 0;
             for (auto g : grad) gnorm += g * g;
@@ -909,7 +1052,7 @@ private:
             
             if (cfg_->verbose_solver && (iter % 10 == 0 || iter < 5))
                 logf("Iter %3zu: Cost=%.4f (S=%.4f, C=%.4f), |g|=%.6f, lr=%.6f", 
-                     iter, cost, smooth, coll, gnorm, lr);
+                     iter, smooth_cost + cfg_->collision_weight * coll_cost, smooth_cost, coll_cost, gnorm, lr);
             
             if (gnorm < cfg_->tolerance) { logf("Converged at iter %zu", iter); return true; }
             
@@ -926,26 +1069,22 @@ private:
     }
     
     bool runAdam(std::vector<double>& x, size_t n_vars, size_t N, size_t D) {
-        double obj_scale = cfg_->use_objective_scaling ? cfg_->objective_scale : 1.0;
-        casadi::Function grad_func = buildSmoothnessGradientFunction(N, D, n_vars, obj_scale);
         log("\nStarting Adam...\n");
         
         std::vector<double> m(n_vars, 0), v(n_vars, 0), grad(n_vars);
+        double smooth_cost, coll_cost;
         
         for (size_t iter = 0; iter < cfg_->max_iterations; ++iter) {
-            computeTotalGradient(x, grad, grad_func, obj_scale);
-            
-            // TRUE cost for logging
-            double smooth, coll;
-            computeTrueCosts(x, smooth, coll);
-            double cost = smooth + cfg_->collision_weight * coll;
+            double cost;
+            computeTotalCostAndGradient(x, cost, grad, smooth_cost, coll_cost);
             
             double gnorm = 0;
             for (auto g : grad) gnorm += g * g;
             gnorm = std::sqrt(gnorm);
             
             if (cfg_->verbose_solver && (iter % 10 == 0 || iter < 5))
-                logf("Iter %3zu: Cost=%.4f (S=%.4f, C=%.4f), |g|=%.6f", iter, cost, smooth, coll, gnorm);
+                logf("Iter %3zu: Cost=%.4f (S=%.4f, C=%.4f), |g|=%.6f", 
+                     iter, smooth_cost + cfg_->collision_weight * coll_cost, smooth_cost, coll_cost, gnorm);
             
             if (gnorm < cfg_->tolerance) { logf("Converged at iter %zu", iter); return true; }
             

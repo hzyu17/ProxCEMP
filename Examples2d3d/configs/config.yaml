@@ -1,119 +1,156 @@
-casadi_planner:
-  scaling:
-    use_objective_scaling: true
-    objective_scale: 1e-4
-  adam:
-    beta1: 0.9
-    beta2: 0.999
-    epsilon: 1e-8
-    learning_rate: 0.01          # Tested value
-  collision_weight: 10.0         # Updated: was 1.0, tested with 10.0
-  finite_diff_eps: 1e-4
-  gradient_descent:
-    learning_rate: 0.001         # Updated: was 0.01, reduced to prevent NaN
-    lr_decay: 1.0                # Updated: was 0.999, no decay for stability
-    momentum: 0.9
-    use_nesterov: true
-  ipopt:
-    tol: 1e-4
-    acceptable_tol: 1e-2
-    max_iter: 500
-    acceptable_iter: 5
-    hessian_approximation: limited-memory
-    linear_solver: mumps
-    max_cpu_time: 60.0
-    print_level: 0
-    warm_start_init_point: 'yes'
-  lbfgs:
-    max_iterations: 100
-    history_size: 10
-    max_iterations: 500
-  scp:
-    accept_ratio: 0.1
-    convergence_tol: 1e-4
-    good_ratio: 0.75
-    inner_max_iter: 200         
-    max_outer_iter: 50
-    trust_expand: 2.0
-    trust_region_init: 10.0
-    trust_region_max: 1000.0
-    trust_region_min: 1e-4
-    trust_shrink: 0.5
-    stall_limit: 10
-  solver: ipopt
-  sqp:
-    beta: 0.5
-    c1: 1e-4
-    hessian_approximation: bfgs
-    max_iter_ls: 20
-    qp_solver: qpoases
-  tolerance: 1e-6
-  verbose_solver: true
-  max_iterations: 5000           # Added: for GD/Adam
+# =============================================================================
+# Motion Planning Configuration
+# =============================================================================
 
+# -----------------------------------------------------------------------------
+# Environment Settings
+# -----------------------------------------------------------------------------
 environment:
+  map_width: 800
+  map_height: 600
+  num_obstacles: 20
+  obstacle_radius: 20.0
   clearance_distance: 100.0
   cost:
     epsilon_sdf: 1.0
     sigma_obs: 1.0
-  map_height: 600
-  map_width: 800
-  num_obstacles: 20
-  obstacle_radius: 20.0
 
-experiment:
-  config_file: config.yaml
-  enable_logging: true
-  log_directory: ./logs
-  random_seed: 19
-  visualize_initial_state: false
-
+# -----------------------------------------------------------------------------
+# Motion Planning Problem Definition
+# -----------------------------------------------------------------------------
 motion_planning:
-  goal_position:
-    - 750.0
-    - 50.0
-  node_collision_radius: 15.0
   num_dimensions: 2
   num_discretization: 500
+  total_time: 10.0
+  node_collision_radius: 15.0
   start_position:
     - 50.0
     - 550.0
-  total_time: 10.0               # Good: matches tested value
+  goal_position:
+    - 750.0
+    - 50.0
 
-ngd_planner:
-  cov_scale_final: 0.01
-  cov_scale_initial: 1.0
-  covariance_schedule: cosine
-  ema_alpha: 0.5
-  learning_rate: 1e-4
-  num_iterations: 50
-  num_samples: 100
-  temperature: 1.5
-  temperature_final: 0.05
+# -----------------------------------------------------------------------------
+# Experiment Settings
+# -----------------------------------------------------------------------------
+experiment:
+  config_file: config.yaml
+  random_seed: 19
+  enable_logging: true
+  log_directory: ./logs
+  visualize_initial_state: false
 
-pce_planner:
-  cov_scale_final: 0.1
-  cov_scale_initial: 10.0
-  covariance_schedule: cosine
-  elite_ratio: 0.1
-  ema_alpha: 0.2
-  eta: 1.5
-  num_iterations: 50
-  num_samples: 500
-  temperature: 1.0
-  temperature_final: 0.02
+# =============================================================================
+# CasADi Motion Planner Configuration
+# =============================================================================
+# Supported solvers: lbfgs, ipopt, sqp, gd (gradient_descent), adam
+# =============================================================================
+casadi_planner:
+  # --- Common Parameters ---
+  solver: ipopt                    # Options: lbfgs, ipopt, sqp, gd, adam
+  max_iterations: 500              # Max iterations for first-order methods (GD/Adam/L-BFGS)
+  tolerance: 1e-6                  # Convergence tolerance (gradient norm)
+  collision_weight: 10.0           # Weight for collision cost term
+  finite_diff_eps: 1e-4            # Epsilon for finite difference gradients (fallback)
+  verbose_solver: true             # Print optimization progress
+  use_symbolic_collision: true     # Use analytical collision gradients (requires CasadiCollisionTask)
 
+  # --- Objective Scaling ---
+  scaling:
+    use_objective_scaling: true
+    objective_scale: 1e-4          # Scale factor for numerical stability
 
+  # --- L-BFGS Parameters ---
+  lbfgs:
+    history_size: 10               # Number of past gradients to store
+
+  # --- IPOPT Parameters (used as inner solver in SCP) ---
+  ipopt:
+    linear_solver: mumps           # Options: mumps, ma27, ma57, pardiso
+    hessian_approximation: limited-memory  # Options: limited-memory, exact
+    tol: 1e-4                      # IPOPT convergence tolerance
+    acceptable_tol: 1e-2           # Acceptable tolerance for early termination
+    acceptable_iter: 5             # Iterations at acceptable tolerance before stopping
+    max_iter: 500                  # Max IPOPT iterations per subproblem
+    max_cpu_time: 60.0             # Max CPU time in seconds
+    print_level: 0                 # IPOPT verbosity (0-12)
+    warm_start_init_point: 'yes'   # Enable warm starting between SCP iterations
+
+  # --- Sequential Convex Programming (SCP) Parameters ---
+  # Used by IPOPT and SQP solvers for handling non-convex collision costs
+  scp:
+    max_outer_iter: 100             # Max SCP outer iterations
+    inner_max_iter: 200            # Max inner solver iterations per SCP step
+    trust_region_init: 10.0        # Initial trust region radius
+    trust_region_min: 1e-4         # Minimum trust region (triggers convergence)
+    trust_region_max: 1000.0       # Maximum trust region radius
+    trust_expand: 2.0              # Trust region expansion factor (good step)
+    trust_shrink: 0.5              # Trust region shrink factor (bad step)
+    accept_ratio: 0.1              # Min actual/predicted reduction to accept step
+    good_ratio: 0.75               # Ratio threshold for trust region expansion
+    convergence_tol: 1e-4          # Step size convergence tolerance
+    cost_improvement_tol: 1e-4     # Relative cost improvement tolerance
+    stall_limit: 10                # Max iterations without improvement
+
+  # --- SQP Parameters ---
+  sqp:
+    qp_solver: qrqp                # Options: qpoases, osqp, hpipm, qrqp
+    hessian_approximation: bfgs    # Options: bfgs, gauss-newton
+    max_iter_ls: 20                # Max line search iterations
+    beta: 0.5                      # Line search backtracking factor
+    c1: 1e-4                       # Armijo condition parameter
+
+  # --- Gradient Descent Parameters ---
+  gradient_descent:
+    learning_rate: 0.1           # Step size (reduced for stability)
+    momentum: 0.9                  # Momentum coefficient
+    use_nesterov: true             # Use Nesterov accelerated gradient
+    lr_decay: 1.0                  # Learning rate decay (1.0 = no decay)
+
+  # --- Adam Parameters ---
+  adam:
+    learning_rate: 0.1            # Step size
+    beta1: 0.9                     # First moment decay
+    beta2: 0.999                   # Second moment decay
+    epsilon: 1e-8                  # Numerical stability constant
+
+# =============================================================================
+# Alternative Planner Configurations (for comparison)
+# =============================================================================
+
+# --- STOMP (Stochastic Trajectory Optimization) ---
 stomp:
-  # Increase exploration
-  num_iterations: 50           # More iterations
-  num_rollouts: 100              # More samples per iteration
+  num_iterations: 50
+  num_rollouts: 100
   max_rollouts: 10
   num_iterations_after_valid: 10
-  noise_stddev: 50.0            # ~5-10% of workspace diagonal
-  noise_decay: 0.98             # Slower decay
-  # Balance exploration/exploitation
-  exponentiated_cost_sensitivity: 5.0   
-  control_cost_weight: 10.0     # Small smoothness weight
-  # Time step
-  delta_t: 0.02                 # 10.0 total_time / 500 nodes = 0.02
+  noise_stddev: 50.0               # ~5-10% of workspace diagonal
+  noise_decay: 0.98
+  exponentiated_cost_sensitivity: 5.0
+  control_cost_weight: 10.0
+  delta_t: 0.02                    # total_time / num_discretization
+
+# --- PCE (Proximal Cross-Entropy) Planner ---
+pce_planner:
+  num_iterations: 50
+  num_samples: 500
+  elite_ratio: 0.1
+  temperature: 1.0
+  temperature_final: 0.02
+  eta: 1.5
+  ema_alpha: 0.2
+  covariance_schedule: cosine
+  cov_scale_initial: 10.0
+  cov_scale_final: 0.1
+
+# --- NGD (Natural Gradient Descent) Planner ---
+ngd_planner:
+  num_iterations: 50
+  num_samples: 100
+  learning_rate: 1e-4
+  temperature: 1.5
+  temperature_final: 0.05
+  ema_alpha: 0.5
+  covariance_schedule: cosine
+  cov_scale_initial: 1.0
+  cov_scale_final: 0.01
