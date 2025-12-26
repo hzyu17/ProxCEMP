@@ -48,7 +48,7 @@ casadi_planner:
 environment:
   clearance_distance: 100.0
   cost:
-    epsilon_sdf: 10.0
+    epsilon_sdf: 1.0
     sigma_obs: 1.0
   map_height: 600
   map_width: 800
@@ -86,16 +86,16 @@ ngd_planner:
   temperature_final: 0.05
 
 pce_planner:
-  cov_scale_final: 0.01
-  cov_scale_initial: 1.0
+  cov_scale_final: 0.1
+  cov_scale_initial: 10.0
   covariance_schedule: cosine
   elite_ratio: 0.1
   ema_alpha: 0.2
   eta: 1.5
   num_iterations: 50
-  num_samples: 1000
-  temperature: 1.5
-  temperature_final: 0.05
+  num_samples: 500
+  temperature: 1.0
+  temperature_final: 0.02
 
 
 stomp:
@@ -104,16 +104,10 @@ stomp:
   num_rollouts: 100              # More samples per iteration
   max_rollouts: 10
   num_iterations_after_valid: 10
-  
-  # Adjust noise for 800x600 workspace
   noise_stddev: 50.0            # ~5-10% of workspace diagonal
   noise_decay: 0.98             # Slower decay
-  
   # Balance exploration/exploitation
-  exponentiated_cost_sensitivity: 5.0   # More exploration (was 10)
-  
-  # Add some smoothness
+  exponentiated_cost_sensitivity: 5.0   
   control_cost_weight: 10.0     # Small smoothness weight
-  
   # Time step
   delta_t: 0.02                 # 10.0 total_time / 500 nodes = 0.02
