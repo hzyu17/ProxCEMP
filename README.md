@@ -158,27 +158,39 @@ The library includes three visualization tools for 2D planning scenarios:
 ### Visualization Gallery
 
 <p align="center">
-  <img src="Examples2d3d/figures/noise_trj.png" width="400" alt="2D Trajectory Samples">
-  <img src="Examples2d3d/figures/collision.png" width="400" alt="2D Collision Visualization">
+  <img src="Examples2d3d/figures/noise_trj.png" width="300" alt="2D Trajectory Samples">
+  <img src="Examples2d3d/figures/collision.png" width="300" alt="2D Collision Visualization">
 </p>
 <p align="center">
   <em>Left: Sampled trajectories from smoothness prior. Right: Collision status visualization.</em>
 </p>
 
-<p align="center">
+<!-- <p align="center">
   <img src="Examples2d3d/figures/pce_optimization_cost_convergence.png" width="400" alt="PCE Cost Convergence">
   <img src="Examples2d3d/figures/ngd_optimization_cost_convergence.png" width="400" alt="NGD Cost Convergence">
 </p>
 <p align="center">
   <em>Cost convergence comparison between PCE and NGD algorithms.</em>
-</p>
+</p> -->
 
 <p align="center">
-  <img src="Examples2d3d/figures/pce_anim.gif" width="400" alt="PCE Optimization">
-  <img src="Examples2d3d/figures/ngd_anim.gif" width="400" alt="NGD Optimization">
+  <img src="Examples2d3d/figures/pce_anim.gif" width="300" alt="PCE Optimization">
+  <img src="Examples2d3d/figures/ngd_anim.gif" width="300" alt="NGD Optimization">
 </p>
 <p align="center">
   <em>Optimization progression: PCE (left) vs NGD (right).</em>
+</p>
+
+<p align="center">
+  <img src="Examples2d3d/figures/L-BFGS_anim.gif" width="300" alt="L-BFGS">
+  <img src="Examples2d3d/figures/IPOPT_anim.gif" width="300" alt="IPOPT">
+</p>
+<p align="center">
+  <img src="Examples2d3d/figures/SQP_anim.gif" width="300" alt="SQP">
+  <img src="Examples2d3d/figures/GD_anim.gif" width="300" alt="Gradient Descent">
+</p>
+<p align="center">
+  <em>Optimization progression: Different Solvers in CasADi.</em>
 </p>
 
 <p align="center">
@@ -190,8 +202,8 @@ The library includes three visualization tools for 2D planning scenarios:
 </p>
 
 <p align="center">
-  <img src="Examples2d3d/figures/pce_anim3d.gif" width="400" alt="PCE Optimization">
-  <img src="Examples2d3d/figures/ngd_anim3d.gif" width="400" alt="NGD Optimization">
+  <img src="Examples2d3d/figures/pce_anim3d.gif" width="300" alt="PCE Optimization">
+  <img src="Examples2d3d/figures/ngd_anim3d.gif" width="300" alt="NGD Optimization">
 </p>
 <p align="center">
   <em>Optimization progression 3D: PCE (left) vs NGD (right).</em>
@@ -202,10 +214,10 @@ The library includes three visualization tools for 2D planning scenarios:
 MoveIt integration is available at: [https://github.com/hzyu17/pce_ros](https://github.com/hzyu17/pce_ros)
 
 <p align="center">
-  <img src="Examples2d3d/figures/box.webp" width="400" alt="Box">
-  <img src="Examples2d3d/figures/kitchen.webp" width="400" alt="Kitchen">
-  <img src="Examples2d3d/figures/table.webp" width="400" alt="Table">
-  <img src="Examples2d3d/figures/bookshelf.webp" width="400" alt="Bookshelf">
+  <img src="Examples2d3d/figures/box.webp" width="300" alt="Box">
+  <img src="Examples2d3d/figures/kitchen.webp" width="300" alt="Kitchen">
+  <img src="Examples2d3d/figures/table.webp" width="300" alt="Table">
+  <img src="Examples2d3d/figures/bookshelf.webp" width="300" alt="Bookshelf">
 </p>
 <p align="center">
   <em>Motion Planning for 7-DOF Robot Arm in various scenarios.</em>

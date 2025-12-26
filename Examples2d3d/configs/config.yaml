@@ -102,14 +102,14 @@ casadi_planner:
 
   # --- Gradient Descent Parameters ---
   gradient_descent:
-    learning_rate: 0.1           # Step size (reduced for stability)
+    learning_rate: 0.8           # Step size (reduced for stability)
     momentum: 0.9                  # Momentum coefficient
     use_nesterov: true             # Use Nesterov accelerated gradient
     lr_decay: 1.0                  # Learning rate decay (1.0 = no decay)
 
   # --- Adam Parameters ---
   adam:
-    learning_rate: 0.1            # Step size
+    learning_rate: 0.8            # Step size
     beta1: 0.9                     # First moment decay
     beta2: 0.999                   # Second moment decay
     epsilon: 1e-8                  # Numerical stability constant
