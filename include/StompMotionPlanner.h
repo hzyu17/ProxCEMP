@@ -17,6 +17,7 @@
 #include <vector>
 #include <random>
 #include <iostream>
+#include <mutex>
 
 namespace pce {
 
@@ -26,7 +27,9 @@ namespace pce {
 struct StompIterationData {
     std::vector<Trajectory> samples;    // Noisy rollouts for this iteration
     Trajectory mean_trajectory;          // Mean/updated trajectory
-    float cost = 0.0f;
+    float cost = 0.0f;                   // Total cost from STOMP (state + control)
+    float collision_cost = 0.0f;         // State/collision cost component
+    float smoothness_cost = 0.0f;        // Control/smoothness cost component (derived)
     int iteration_number = 0;
 };
 
@@ -103,6 +106,9 @@ public:
         
         initializeTrajectory();
         
+        // Compute smoothing matrix for noise generation (uses R^-1)
+        computeSmoothingMatrix();
+        
         stomp::StompConfiguration stomp_config = config_.toStompConfig();
         
         std::cout << "STOMP Config Debug:\n"
@@ -177,13 +183,71 @@ public:
         }
         
         if (success || optimized_params.size() > 0) {
-            current_trajectory_ = matrixToTrajectory(optimized_params);
+            std::cout << "Converting final optimized parameters to trajectory...\n";
+            std::cout << "  optimized_params size: " << optimized_params.rows() << " x " << optimized_params.cols() << "\n";
+            current_trajectory_ = matrixToTrajectory(optimized_params, true);  // Enable debug
         }
         
         return success;
     }
     
     // ==================== Task callback implementations ====================
+    
+    /**
+     * @brief Compute the smoothing matrix M from inverse control cost matrix R^-1
+     * This is used to generate temporally correlated noise for STOMP
+     */
+    void computeSmoothingMatrix() {
+        using namespace Eigen;
+        
+        int num_timesteps = config_.num_timesteps;
+        double dt = config_.delta_t;
+        
+        // Finite difference rule length (same as STOMP uses)
+        const int FINITE_DIFF_RULE_LENGTH = 7;
+        int start_index_padded = FINITE_DIFF_RULE_LENGTH - 1;
+        int num_timesteps_padded = num_timesteps + 2 * (FINITE_DIFF_RULE_LENGTH - 1);
+        
+        // Central difference coefficients for acceleration (from stomp/utils.h)
+        const double ACC_COEFFS[7] = {-1.0/90.0, 3.0/20.0, -3.0/2.0, 49.0/18.0, -3.0/2.0, 3.0/20.0, -1.0/90.0};
+        
+        // Generate finite difference matrix for acceleration
+        MatrixXd finite_diff_matrix_A_padded = MatrixXd::Zero(num_timesteps_padded, num_timesteps_padded);
+        double multiplier = 1.0 / (dt * dt);
+        
+        for (int i = 0; i < num_timesteps_padded; ++i) {
+            for (int j = -FINITE_DIFF_RULE_LENGTH / 2; j <= FINITE_DIFF_RULE_LENGTH / 2; ++j) {
+                int index = i + j;
+                if (index < 0 || index >= num_timesteps_padded) continue;
+                finite_diff_matrix_A_padded(i, index) = multiplier * ACC_COEFFS[j + FINITE_DIFF_RULE_LENGTH / 2];
+            }
+        }
+        
+        // Control cost matrix R = dt * A^T * A
+        MatrixXd control_cost_matrix_R_padded = dt * finite_diff_matrix_A_padded.transpose() * finite_diff_matrix_A_padded;
+        MatrixXd control_cost_matrix_R = control_cost_matrix_R_padded.block(
+            start_index_padded, start_index_padded, num_timesteps, num_timesteps);
+        
+        // Inverse of control cost matrix
+        MatrixXd inv_control_cost_matrix_R = control_cost_matrix_R.fullPivLu().inverse();
+        
+        // Scale so max(R^-1) == 1 (same as STOMP does)
+        double maxVal = std::abs(inv_control_cost_matrix_R.maxCoeff());
+        inv_control_cost_matrix_R /= maxVal;
+        
+        // Compute projection/smoothing matrix M
+        // Scale columns so that max of each column is 1/num_timesteps
+        smoothing_matrix_M_ = inv_control_cost_matrix_R;
+        for (int t = 0; t < num_timesteps; ++t) {
+            double col_max = smoothing_matrix_M_(t, t);
+            if (std::abs(col_max) > 1e-10) {
+                smoothing_matrix_M_.col(t) *= (1.0 / (num_timesteps * col_max));
+            }
+        }
+        
+        std::cout << "Computed smoothing matrix M (" << smoothing_matrix_M_.rows() 
+                  << " x " << smoothing_matrix_M_.cols() << ")\n";
+    }
     
     bool taskGenerateNoisyParameters(const MatrixXd& parameters,
                                      std::size_t num_timesteps,
@@ -192,29 +256,39 @@ public:
                                      MatrixXd& parameters_noise,
                                      MatrixXd& noise) 
     {
+        // Generate smooth noise using the projection matrix M (derived from R^-1)
+        // This is the proper STOMP approach for temporally correlated noise
+        
         float decayed_stddev = noise_stddev_ * std::pow(noise_decay_, iteration_number);
         std::normal_distribution<double> dist(0.0, decayed_stddev);
         
-        noise.resize(parameters.rows(), parameters.cols());
-        parameters_noise.resize(parameters.rows(), parameters.cols());
+        size_t num_dims = parameters.rows();
         
-        for (int d = 0; d < parameters.rows(); ++d) {
-            for (int t = 0; t < parameters.cols(); ++t) {
-                if (t == 0 || t == parameters.cols() - 1) {
-                    noise(d, t) = 0.0;
-                } else {
-                    noise(d, t) = dist(rng_);
-                }
+        // Generate white noise
+        VectorXd white_noise(num_timesteps);
+        
+        noise.resize(num_dims, num_timesteps);
+        noise.setZero();
+        
+        for (size_t d = 0; d < num_dims; ++d) {
+            // Generate independent white noise for this dimension
+            for (size_t t = 0; t < num_timesteps; ++t) {
+                white_noise(t) = dist(rng_);
             }
+            
+            // Apply smoothing matrix: smooth_noise = M * white_noise
+            // This produces temporally correlated noise
+            VectorXd smooth_noise = smoothing_matrix_M_ * white_noise;
+            
+            // Copy to noise matrix
+            noise.row(d) = smooth_noise.transpose();
+            
+            // Ensure start and goal have zero noise
+            noise(d, 0) = 0.0;
+            noise(d, num_timesteps - 1) = 0.0;
         }
         
         parameters_noise = parameters + noise;
-        
-        // Store this sample for visualization (like PCE stores sample_trajectories)
-        if (rollout_number >= 0) {
-            Trajectory sample_traj = matrixToTrajectory(parameters_noise);
-            current_iteration_samples_.push_back(sample_traj);
-        }
         
         return true;
     }
@@ -234,9 +308,26 @@ public:
                 const float epsilon = collision_task_->getConfig().epsilon_sdf;
                 const float sigma = collision_task_->getConfig().sigma_obs;
                 
+                // Get dimensions from obstacle data (should match config)
+                size_t obs_dims = obs.centers.rows();
+                size_t param_dims = parameters.rows();
+                size_t param_timesteps = parameters.cols();
+                
+                // Debug: Check dimensions on first call
+                static bool first_call = true;
+                if (first_call) {
+                    std::cout << "  taskComputeCosts: parameters(" << param_dims << " x " << param_timesteps 
+                              << "), obstacles dims=" << obs_dims << ", num_timesteps=" << num_timesteps << "\n";
+                    first_call = false;
+                }
+                
+                // Use minimum of parameter dims and obstacle dims for safety
+                size_t num_dims = std::min(obs_dims, param_dims);
+                
                 for (size_t t = 1; t < num_timesteps - 1; ++t) {
-                    VectorXf pos(parameters.rows());
-                    for (int d = 0; d < parameters.rows(); ++d) {
+                    VectorXf pos(obs_dims);
+                    pos.setZero();
+                    for (size_t d = 0; d < num_dims; ++d) {
                         pos(d) = static_cast<float>(parameters(d, t));
                     }
                     
@@ -254,6 +345,8 @@ public:
     }
     
     bool taskFilterUpdates(MatrixXd& updates) {
+        // STOMP convention: rows=dimensions, cols=timesteps
+        // Zero out start (col 0) and goal (last col) updates
         updates.col(0).setZero();
         updates.col(updates.cols() - 1).setZero();
         return true;
@@ -262,13 +355,87 @@ public:
     void taskPostIteration(int iteration_number, double cost, const MatrixXd& parameters) {
         current_iteration_ = iteration_number;
         
-        Trajectory mean_traj = matrixToTrajectory(parameters);
+        // Debug: Print raw matrix info on first iteration
+        if (iteration_number == 0) {
+            std::cout << "\n[DEBUG] taskPostIteration raw parameters matrix:\n";
+            std::cout << "  Matrix dimensions: " << parameters.rows() << " x " << parameters.cols() << "\n";
+            std::cout << "  First column (t=0): ";
+            for (int r = 0; r < std::min(int(parameters.rows()), 5); ++r) {
+                std::cout << parameters(r, 0) << " ";
+            }
+            std::cout << "\n  First row (d=0): ";
+            for (int c = 0; c < std::min(int(parameters.cols()), 5); ++c) {
+                std::cout << parameters(0, c) << " ";
+            }
+            std::cout << "\n  Last column (t=" << (parameters.cols()-1) << "): ";
+            for (int r = 0; r < std::min(int(parameters.rows()), 5); ++r) {
+                std::cout << parameters(r, parameters.cols()-1) << " ";
+            }
+            std::cout << "\n  Last row (d=" << (parameters.rows()-1) << "): ";
+            for (int c = 0; c < std::min(int(parameters.cols()), 5); ++c) {
+                std::cout << parameters(parameters.rows()-1, c) << " ";
+            }
+            std::cout << "\n  Expected start: (" << config_.start_position[0] << ", " << config_.start_position[1] << ")\n";
+            std::cout << "  Expected goal: (" << config_.goal_position[0] << ", " << config_.goal_position[1] << ")\n";
+        }
+        
+        // Debug first iteration's trajectory in detail
+        bool debug_traj = (iteration_number == 0);
+        Trajectory mean_traj = matrixToTrajectory(parameters, debug_traj);
+        
+        // Debug: verify mean trajectory endpoints
+        if (iteration_number == 0 || iteration_number == 1) {
+            if (!mean_traj.nodes.empty() && mean_traj.nodes[0].position.size() >= 2) {
+                std::cout << "  Iter " << iteration_number << " mean traj: start=("
+                          << mean_traj.nodes[0].position(0) << ", " 
+                          << mean_traj.nodes[0].position(1) << "), goal=("
+                          << mean_traj.nodes.back().position(0) << ", "
+                          << mean_traj.nodes.back().position(1) << ")\n";
+            }
+        }
+        
+        // Compute collision cost for the mean trajectory (same as in taskComputeCosts)
+        float collision_cost = 0.0f;
+        if (collision_task_) {
+            const auto& obs = collision_task_->getObstacleSoA();
+            if (!obs.empty()) {
+                const float epsilon = collision_task_->getConfig().epsilon_sdf;
+                const float sigma = collision_task_->getConfig().sigma_obs;
+                
+                // Use obstacle dimensions (should match parameter dimensions)
+                size_t obs_dims = obs.centers.rows();
+                size_t param_dims = parameters.rows();
+                size_t num_timesteps = parameters.cols();
+                size_t num_dims = std::min(obs_dims, param_dims);
+                
+                for (size_t t = 1; t < num_timesteps - 1; ++t) {
+                    VectorXf pos(obs_dims);
+                    pos.setZero();
+                    for (size_t d = 0; d < num_dims; ++d) {
+                        pos(d) = static_cast<float>(parameters(d, t));
+                    }
+                    
+                    Eigen::MatrixXf diff = obs.centers.colwise() - pos;
+                    Eigen::VectorXf distances = diff.colwise().norm();
+                    Eigen::VectorXf sdfs = distances - obs.combined_radii;
+                    Eigen::VectorXf hinges = (epsilon - sdfs.array()).max(0.0f);
+                    collision_cost += sigma * hinges.squaredNorm();
+                }
+            }
+        }
+        
+        // Smoothness cost is derived from STOMP's total cost
+        // STOMP total = state_cost + control_cost (where control_cost is the smoothness)
+        float total_cost = static_cast<float>(cost);
+        float smoothness_cost = std::max(0.0f, total_cost - collision_cost);
         
         // Store iteration data with samples (like PCE's trajectory_history_)
         StompIterationData iter_data;
         iter_data.samples = std::move(current_iteration_samples_);
         iter_data.mean_trajectory = mean_traj;
-        iter_data.cost = static_cast<float>(cost);
+        iter_data.cost = total_cost;
+        iter_data.collision_cost = collision_cost;
+        iter_data.smoothness_cost = smoothness_cost;
         iter_data.iteration_number = iteration_number;
         
         optimization_history_.iterations.push_back(iter_data);
@@ -279,8 +446,10 @@ public:
         
         if (iteration_number % 10 == 0) {
             std::cout << "  STOMP Iteration " << iteration_number 
-                      << ": cost = " << cost 
-                      << ", samples = " << iter_data.samples.size() << "\n";
+                      << ": total=" << total_cost 
+                      << ", collision=" << collision_cost
+                      << ", smooth=" << smoothness_cost
+                      << ", samples=" << iter_data.samples.size() << "\n";
         }
     }
     
@@ -340,16 +509,34 @@ private:
             goal(d) = config_.goal_position[d];
         }
         
+        std::cout << "Initializing trajectory: start=(" << start(0) << ", " << start(1) 
+                  << "), goal=(" << goal(0) << ", " << goal(1) 
+                  << "), timesteps=" << config_.num_timesteps << "\n";
+        
         for (size_t t = 0; t < config_.num_timesteps; ++t) {
             float alpha = static_cast<float>(t) / (config_.num_timesteps - 1);
             current_trajectory_.nodes[t].position = (1.0f - alpha) * start + alpha * goal;
         }
+        
+        // Set start and goal indices for visualization
+        current_trajectory_.start_index = 0;
+        current_trajectory_.goal_index = config_.num_timesteps - 1;
+        
+        // Verify first and last nodes
+        std::cout << "  Initialized trajectory node[0]=(" 
+                  << current_trajectory_.nodes[0].position(0) << ", " 
+                  << current_trajectory_.nodes[0].position(1) << ")\n";
+        std::cout << "  Initialized trajectory node[" << (config_.num_timesteps-1) << "]=(" 
+                  << current_trajectory_.nodes[config_.num_timesteps-1].position(0) << ", " 
+                  << current_trajectory_.nodes[config_.num_timesteps-1].position(1) << ")\n";
     }
     
-    Trajectory matrixToTrajectory(const MatrixXd& params) const {
+    Trajectory matrixToTrajectory(const MatrixXd& params, bool debug = false) const {
         Trajectory traj;
         if (params.size() == 0) return traj;
         
+        // STOMP convention: rows = dimensions, cols = timesteps
+        // params(d, t) gives dimension d at timestep t
         size_t num_dims = params.rows();
         size_t num_timesteps = params.cols();
         
@@ -360,6 +547,55 @@ private:
                 traj.nodes[t].position(d) = static_cast<float>(params(d, t));
             }
         }
+        
+        // Set start and goal indices for visualization
+        traj.start_index = 0;
+        traj.goal_index = num_timesteps - 1;
+        
+        // Debug: print trajectory info
+        if (debug && num_timesteps > 0 && num_dims >= 2) {
+            std::cout << "  Trajectory debug (dims=" << num_dims << ", timesteps=" << num_timesteps << "):\n";
+            std::cout << "    Matrix size: " << params.rows() << " x " << params.cols() << "\n";
+            
+            // Print first 5 timesteps
+            std::cout << "    First 5 nodes:\n";
+            for (size_t t = 0; t < std::min(num_timesteps, size_t(5)); ++t) {
+                std::cout << "      t=" << t << ": (" 
+                          << traj.nodes[t].position(0) << ", " 
+                          << traj.nodes[t].position(1) << ")\n";
+            }
+            
+            // Print last 3 timesteps
+            std::cout << "    Last 3 nodes:\n";
+            for (size_t t = num_timesteps - 3; t < num_timesteps; ++t) {
+                std::cout << "      t=" << t << ": (" 
+                          << traj.nodes[t].position(0) << ", " 
+                          << traj.nodes[t].position(1) << ")\n";
+            }
+            
+            // Check if trajectory is monotonic (should increase or decrease smoothly)
+            float dx_sum = 0, dy_sum = 0;
+            int sign_changes_x = 0, sign_changes_y = 0;
+            float prev_dx = 0, prev_dy = 0;
+            for (size_t t = 1; t < num_timesteps; ++t) {
+                float dx = traj.nodes[t].position(0) - traj.nodes[t-1].position(0);
+                float dy = traj.nodes[t].position(1) - traj.nodes[t-1].position(1);
+                dx_sum += dx;
+                dy_sum += dy;
+                if (t > 1) {
+                    if ((dx > 0) != (prev_dx > 0) && std::abs(dx) > 0.01f && std::abs(prev_dx) > 0.01f) sign_changes_x++;
+                    if ((dy > 0) != (prev_dy > 0) && std::abs(dy) > 0.01f && std::abs(prev_dy) > 0.01f) sign_changes_y++;
+                }
+                prev_dx = dx;
+                prev_dy = dy;
+            }
+            std::cout << "    Total displacement: (" << dx_sum << ", " << dy_sum << ")\n";
+            std::cout << "    Direction changes: x=" << sign_changes_x << ", y=" << sign_changes_y << "\n";
+            if (sign_changes_x > 10 || sign_changes_y > 10) {
+                std::cout << "    WARNING: Many direction changes detected - trajectory may be zig-zagging!\n";
+            }
+        }
+        
         return traj;
     }
     
@@ -382,6 +618,10 @@ private:
     std::vector<Trajectory> trajectory_history_;              // Mean trajectories (like PCE)
     StompOptimizationHistory optimization_history_;           // Full history with samples
     std::vector<Trajectory> current_iteration_samples_;       // Temp storage during iteration
+    mutable std::mutex samples_mutex_;                        // Protects current_iteration_samples_
+    
+    // Smoothing matrix for noise generation (computed from R^-1)
+    Eigen::MatrixXd smoothing_matrix_M_;
     
     float final_cost_;
     bool converged_;

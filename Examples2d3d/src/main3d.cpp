@@ -242,85 +242,6 @@ int main() {
         std::cout << "\n✗ STOMP 3D optimization failed\n";
     }
 
-    // // =========================================================================
-    // // CASADI PLANNERS (3D)
-    // // =========================================================================
-    // std::vector<std::string> casadi_solvers = {"ipopt"};
-
-    // std::map<std::string, OptimizationHistory> casadi_histories;
-    // std::map<std::string, bool> casadi_success;
-    // std::map<std::string, std::shared_ptr<CasADiMotionPlanner>> casadi_planners;
-    // std::map<std::string, std::shared_ptr<pce::CollisionAvoidanceTask>> casadi_tasks;
-    
-    // for (const auto& solver_name : casadi_solvers) {
-    //     std::cout << "\n=== CasADi Planner (" << solver_name << ") - 3D ===\n";
-
-    //     auto task_casadi = std::make_shared<pce::CollisionAvoidanceTask>(config);
-    //     casadi_tasks[solver_name] = task_casadi;
-
-    //     auto planner_casadi = std::make_shared<CasADiMotionPlanner>(task_casadi);
-    //     casadi_planners[solver_name] = planner_casadi;
-
-    //     CasADiConfig casadi_config;
-    //     if (!casadi_config.loadFromFile(config_file)) {
-    //         std::cerr << "Failed to load CasADi configuration from file\n";
-    //         casadi_success[solver_name] = false;
-    //         continue;
-    //     }
-        
-    //     casadi_config.solver = solver_name;
-    //     casadi_config.solver_type = stringToSolverType(solver_name);
-
-    //     std::cout << "Initializing CasADi-" << solver_name << " (3D)...\n";
-    //     if (!planner_casadi->initialize(casadi_config)) {
-    //         std::cerr << "Error: CasADi-" << solver_name << " initialization failed\n";
-    //         casadi_success[solver_name] = false;
-    //         continue;
-    //     }
-
-    //     std::cout << "Running CasADi-" << solver_name << " 3D optimization...\n";
-
-    //     OptimizationHistory history;
-    //     history.clear();
-
-    //     {
-    //         IterationData init_data;
-    //         init_data.iteration = 0;
-    //         init_data.mean_trajectory = planner_casadi->getCurrentTrajectory();
-    //         init_data.total_cost = task_casadi->computeStateCost(init_data.mean_trajectory);
-    //         init_data.collision_cost = init_data.total_cost;
-    //         init_data.smoothness_cost = 0.0f;
-    //         history.addIteration(init_data);
-    //     }
-
-    //     bool success = planner_casadi->solve();
-    //     casadi_success[solver_name] = success;
-
-    //     auto traj_history = planner_casadi->getTrajectoryHistory();
-    //     for (size_t i = 0; i < traj_history.size(); ++i) {
-    //         IterationData iter_data;
-    //         iter_data.iteration = i;
-    //         iter_data.mean_trajectory = traj_history[i];
-    //         iter_data.total_cost = task_casadi->computeStateCost(traj_history[i]);
-    //         iter_data.collision_cost = iter_data.total_cost;
-    //         iter_data.smoothness_cost = 0.0f;
-    //         history.addIteration(iter_data);
-    //     }
-
-    //     history.final_trajectory = planner_casadi->getCurrentTrajectory();
-    //     history.final_cost = task_casadi->computeStateCost(history.final_trajectory);
-    //     history.converged = success;
-    //     history.total_iterations = traj_history.size();
-
-    //     casadi_histories[solver_name] = history;
-
-    //     if (success) {
-    //         std::cout << "✓ CasADi-" << solver_name << " 3D completed successfully\n";
-    //     } else {
-    //         std::cout << "✗ CasADi-" << solver_name << " 3D failed\n";
-    //     }
-    // }
-
     // =========================================================================
     // 3D VISUALIZATION WITH MULTI-VIEW PROJECTIONS
     // =========================================================================
@@ -357,21 +278,6 @@ int main() {
 
     std::cout << "Displaying STOMP cost convergence...\n";
     visualizer.showCostPlot(stomp_history, "STOMP 3D - Cost Convergence");
-
-    // // Show CasADi 3D results
-    // for (const auto& solver_name : casadi_solvers) {
-    //     if (casadi_histories.find(solver_name) == casadi_histories.end()) continue;
-        
-    //     const auto& history = casadi_histories[solver_name];
-        
-    //     std::cout << "Displaying CasADi-" << solver_name << " 3D trajectory evolution...\n";
-    //     visualizer.setOutputPrefix("casadi_" + solver_name + "_3d");
-    //     visualizer.showTrajectoryEvolution3D(*obstacle_map_ptr, history, 
-    //                                           "CasADi-" + solver_name + " 3D - Trajectory Evolution");
-
-    //     std::cout << "Displaying CasADi-" << solver_name << " cost convergence...\n";
-    //     visualizer.showCostPlot(history, "CasADi-" + solver_name + " 3D - Cost Convergence");
-    // }
 
     // =========================================================================
     // SUMMARY
@@ -415,21 +321,6 @@ int main() {
               << std::setw(15) << stomp_final_res.first
               << stomp_final_res.second << "\n";
 
-    // for (const auto& solver_name : casadi_solvers) {
-    //     if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
-        
-    //     auto casadi_final_res = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
-    //     const auto& history = casadi_histories[solver_name];
-    //     bool success = casadi_success[solver_name];
-        
-    //     std::string planner_name = "CasADi-" + solver_name + " (3D)";
-    //     std::cout << std::left << std::setw(18) << planner_name
-    //               << std::setw(12) << (success ? "SUCCESS" : "FAILED")
-    //               << std::setw(10) << history.total_iterations
-    //               << std::setw(15) << casadi_final_res.first
-    //               << casadi_final_res.second << "\n";
-    // }
-
     std::cout << std::string(70, '-') << "\n";
 
     // Find best result
@@ -445,15 +336,6 @@ int main() {
         best_cost = stomp_final_res.first;
         best_planner = "STOMP (3D)";
     }
-    
-    // for (const auto& solver_name : casadi_solvers) {
-    //     if (casadi_planners.find(solver_name) == casadi_planners.end()) continue;
-    //     auto res = evaluate_final(casadi_planners[solver_name]->getCurrentTrajectory());
-    //     if (res.first < best_cost && !std::isnan(res.first)) {
-    //         best_cost = res.first;
-    //         best_planner = "CasADi-" + solver_name + " (3D)";
-    //     }
-    // }
     
     std::cout << "\n★ Best 3D result: " << best_planner << " with total cost = " << best_cost << "\n";
 

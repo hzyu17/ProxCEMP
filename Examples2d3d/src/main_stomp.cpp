@@ -51,38 +51,87 @@ int main() {
                               "STOMP - Initial State");
     }
 
-    OptimizationHistory stomp_history;
-    
-    // Record initial state
-    {
-        IterationData init_data;
-        init_data.iteration = 0;
-        init_data.mean_trajectory = planner_stomp->getCurrentTrajectory();
-        init_data.collision_cost = task_stomp->computeStateCost(init_data.mean_trajectory);
-        init_data.smoothness_cost = planner_stomp->computeSmoothnessCost(init_data.mean_trajectory);
-        init_data.total_cost = init_data.collision_cost + init_data.smoothness_cost;
-        stomp_history.addIteration(init_data);
-    }
-
     std::cout << "\n=== Running STOMP Optimization ===\n";
     bool success_stomp = planner_stomp->solve();
 
-    // Record iteration history
-    for (size_t i = 0; i < planner_stomp->getTrajectoryHistory().size(); ++i) {
-        IterationData iter_data;
-        iter_data.iteration = i + 1;
-        iter_data.mean_trajectory = planner_stomp->getTrajectoryHistory()[i];
-        iter_data.collision_cost = task_stomp->computeStateCost(iter_data.mean_trajectory);
-        iter_data.smoothness_cost = planner_stomp->computeSmoothnessCost(iter_data.mean_trajectory);
-        iter_data.total_cost = iter_data.collision_cost + iter_data.smoothness_cost;
-        stomp_history.addIteration(iter_data);
+    // =========================================================================
+    // Convert STOMP history using StompAdapter
+    // =========================================================================
+    // Debug: Print costs from planner's history before conversion
+    const auto& planner_history = planner_stomp->getOptimizationHistory();
+    std::cout << "\n[DEBUG] Planner history has " << planner_history.iterations.size() << " iterations\n";
+    if (!planner_history.iterations.empty()) {
+        const auto& last_planner_iter = planner_history.iterations.back();
+        std::cout << "[DEBUG] Last planner iteration: cost=" << last_planner_iter.cost
+                  << ", collision=" << last_planner_iter.collision_cost
+                  << ", smooth=" << last_planner_iter.smoothness_cost << "\n";
+    }
+
+    OptimizationHistory stomp_history = StompAdapter::convert(planner_history);
+
+    // Debug: Print costs after conversion
+    std::cout << "[DEBUG] Converted history has " << stomp_history.iterations.size() << " iterations\n";
+    if (!stomp_history.iterations.empty()) {
+        const auto& last_vis_iter = stomp_history.iterations.back();
+        std::cout << "[DEBUG] Last converted iteration: total=" << last_vis_iter.total_cost
+                  << ", collision=" << last_vis_iter.collision_cost
+                  << ", smooth=" << last_vis_iter.smoothness_cost << "\n";
     }
 
     stomp_history.final_trajectory = planner_stomp->getCurrentTrajectory();
-    stomp_history.final_cost = task_stomp->computeStateCost(stomp_history.final_trajectory) +
-                               planner_stomp->computeSmoothnessCost(stomp_history.final_trajectory);
+    stomp_history.final_cost = planner_stomp->getFinalCost();
     stomp_history.converged = success_stomp;
-    stomp_history.total_iterations = planner_stomp->getTrajectoryHistory().size();
+    stomp_history.total_iterations = planner_stomp->getNumIterations();
+
+    // Verify trajectory structure before visualization
+    std::cout << "\n[DEBUG] Verifying final trajectory:\n";
+    const auto& final_traj = stomp_history.final_trajectory;
+    std::cout << "  Number of nodes: " << final_traj.nodes.size() << "\n";
+    std::cout << "  start_index: " << final_traj.start_index << ", goal_index: " << final_traj.goal_index << "\n";
+    if (!final_traj.nodes.empty()) {
+        std::cout << "  First node position size: " << final_traj.nodes[0].position.size() << "\n";
+        if (final_traj.nodes[0].position.size() >= 2) {
+            std::cout << "  First 5 nodes:\n";
+            for (size_t i = 0; i < std::min(size_t(5), final_traj.nodes.size()); ++i) {
+                std::cout << "    [" << i << "] (" << final_traj.nodes[i].position(0) 
+                          << ", " << final_traj.nodes[i].position(1) << ")\n";
+            }
+            std::cout << "  Last 3 nodes:\n";
+            size_t n = final_traj.nodes.size();
+            for (size_t i = n - 3; i < n; ++i) {
+                std::cout << "    [" << i << "] (" << final_traj.nodes[i].position(0) 
+                          << ", " << final_traj.nodes[i].position(1) << ")\n";
+            }
+        }
+    }
+    
+    // Also verify the first iteration's trajectory
+    if (!stomp_history.iterations.empty()) {
+        std::cout << "\n[DEBUG] Verifying first iteration trajectory:\n";
+        const auto& first_traj = stomp_history.iterations[0].mean_trajectory;
+        std::cout << "  Number of nodes: " << first_traj.nodes.size() << "\n";
+        if (!first_traj.nodes.empty() && first_traj.nodes[0].position.size() >= 2) {
+            std::cout << "  First 3 nodes:\n";
+            for (size_t i = 0; i < std::min(size_t(3), first_traj.nodes.size()); ++i) {
+                std::cout << "    [" << i << "] (" << first_traj.nodes[i].position(0) 
+                          << ", " << first_traj.nodes[i].position(1) << ")\n";
+            }
+        }
+    }
+
+    // Print sample statistics
+    std::cout << "  Iterations collected: " << stomp_history.iterations.size() << "\n";
+    if (!stomp_history.iterations.empty()) {
+        size_t total_samples = 0;
+        for (const auto& iter : stomp_history.iterations) {
+            total_samples += iter.samples.size();
+        }
+        std::cout << "  Total samples captured: " << total_samples << "\n";
+        if (total_samples > 0) {
+            std::cout << "  Average samples/iteration: " 
+                      << (total_samples / stomp_history.iterations.size()) << "\n";
+        }
+    }
 
     std::cout << (success_stomp ? "\n✓ STOMP optimization completed successfully\n"
                                 : "\n✗ STOMP optimization failed\n");
@@ -95,6 +144,11 @@ int main() {
     auto obstacle_map_ptr = task_stomp->getObstacleMap();
     OptimizationVisualizer visualizer(900, 700);
 
+    // Show hint about sample visualization if samples are available
+    if (!stomp_history.iterations.empty() && !stomp_history.iterations[0].samples.empty()) {
+        std::cout << "  Samples available - press 'A' to toggle sample visualization\n";
+    }
+
     visualizer.showTrajectoryEvolution(*obstacle_map_ptr, stomp_history, "STOMP - Trajectory Evolution");
     visualizer.showCostPlot(stomp_history, "STOMP - Cost Convergence");
 
@@ -105,20 +159,47 @@ int main() {
     std::cout << "   STOMP Results Summary\n";
     std::cout << "=================================================\n";
 
-    float final_collision = task_stomp->computeStateCost(planner_stomp->getCurrentTrajectory());
-    float final_smoothness = planner_stomp->computeSmoothnessCost(planner_stomp->getCurrentTrajectory());
-    float final_total = final_collision + final_smoothness;
+    // Get costs directly from planner's internal optimization history (known to be correct)
+    const auto& internal_history = planner_stomp->getOptimizationHistory();
+    
+    float final_collision = 0.0f;
+    float final_smoothness = 0.0f;
+    float final_total = planner_stomp->getFinalCost();
+    float initial_cost = final_total;  // Default to final if no history
+    
+    if (!internal_history.iterations.empty()) {
+        const auto& final_iter = internal_history.iterations.back();
+        final_collision = final_iter.collision_cost;
+        final_smoothness = final_iter.smoothness_cost;
+        final_total = final_iter.cost;  // Use .cost not .total_cost (pce::StompIterationData field name)
+        
+        // Get initial cost for improvement calculation
+        initial_cost = internal_history.iterations.front().cost;
+        if (initial_cost < 1e-6f) {
+            // Initial iteration might have cost=0, use second iteration if available
+            if (internal_history.iterations.size() > 1) {
+                initial_cost = internal_history.iterations[1].cost;
+            }
+        }
+    }
 
     std::cout << std::left << std::setw(20) << "Status:" 
               << (success_stomp ? "SUCCESS" : "FAILED") << "\n";
     std::cout << std::left << std::setw(20) << "Iterations:" 
               << stomp_history.total_iterations << "\n";
     std::cout << std::left << std::setw(20) << "Collision Cost:" 
-              << final_collision << "\n";
+              << std::fixed << std::setprecision(4) << final_collision << "\n";
     std::cout << std::left << std::setw(20) << "Smoothness Cost:" 
-              << final_smoothness << "\n";
+              << std::fixed << std::setprecision(4) << final_smoothness << "\n";
     std::cout << std::left << std::setw(20) << "Total Cost:" 
-              << final_total << "\n";
+              << std::fixed << std::setprecision(4) << final_total << "\n";
+
+    // Show cost improvement
+    if (initial_cost > 1e-6f) {
+        float improvement = (initial_cost - final_total) / initial_cost * 100.0f;
+        std::cout << std::left << std::setw(20) << "Cost Reduction:" 
+                  << std::fixed << std::setprecision(1) << improvement << "%\n";
+    }
 
     std::cout << "\n=================================================\n";
 

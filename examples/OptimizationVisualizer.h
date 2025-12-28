@@ -736,6 +736,25 @@ private:
         }
     }
 
+    // === Trajectory Validation ===
+    // Check if a trajectory has valid 2D positions for drawing
+    static bool isValidTrajectory2D(const Trajectory& trajectory) {
+        if (trajectory.nodes.empty()) return false;
+        for (const auto& node : trajectory.nodes) {
+            if (node.position.size() < 2) return false;
+        }
+        return true;
+    }
+    
+    // Check if a trajectory has valid 3D positions for drawing
+    static bool isValidTrajectory3D(const Trajectory& trajectory) {
+        if (trajectory.nodes.empty()) return false;
+        for (const auto& node : trajectory.nodes) {
+            if (node.position.size() < 3) return false;
+        }
+        return true;
+    }
+
     // === Publication-Quality Trajectory Drawing ===
     // Note: visualization_base.h drawTrajectorySegments() uses thin LineStrip.
     // This version uses thick rectangle lines for publication figures.
@@ -743,6 +762,9 @@ private:
     void drawThickTrajectory(RenderTarget& target, const Trajectory& trajectory,
                              float scale, float offset_x, float offset_y,
                              sf::Color color, float lineWidth) {
+        // Validate trajectory before drawing
+        if (!isValidTrajectory2D(trajectory)) return;
+        
         for (size_t i = 0; i + 1 < trajectory.nodes.size(); ++i) {
             sf::Vector2f p1 = {offset_x + trajectory.nodes[i].position(0) * scale,
                                offset_y + trajectory.nodes[i].position(1) * scale};
@@ -815,21 +837,26 @@ private:
         drawThickTrajectory(target, mean_traj, scale, offset_x, offset_y,
                            Colors::current(), Sizes::currentLine);
 
-        // Waypoints
-        for (size_t i = 1; i + 1 < mean_traj.nodes.size(); ++i) {
-            sf::Vector2f pos = transform(mean_traj.nodes[i].position(0), mean_traj.nodes[i].position(1));
-            sf::CircleShape marker(Sizes::waypoint);
-            marker.setPosition({pos.x - Sizes::waypoint, pos.y - Sizes::waypoint});
-            marker.setFillColor(Colors::current());
-            target.draw(marker);
+        // Waypoints (only if trajectory is valid for 2D)
+        if (isValidTrajectory2D(mean_traj)) {
+            for (size_t i = 1; i + 1 < mean_traj.nodes.size(); ++i) {
+                sf::Vector2f pos = transform(mean_traj.nodes[i].position(0), mean_traj.nodes[i].position(1));
+                sf::CircleShape marker(Sizes::waypoint);
+                marker.setPosition({pos.x - Sizes::waypoint, pos.y - Sizes::waypoint});
+                marker.setFillColor(Colors::current());
+                target.draw(marker);
+            }
         }
 
-        // Start and Goal markers
-        if (!mean_traj.nodes.empty()) {
-            sf::Vector2f start_pos = transform(mean_traj.nodes[mean_traj.start_index].position(0),
-                                               mean_traj.nodes[mean_traj.start_index].position(1));
-            sf::Vector2f goal_pos = transform(mean_traj.nodes[mean_traj.goal_index].position(0),
-                                              mean_traj.nodes[mean_traj.goal_index].position(1));
+        // Start and Goal markers (only if trajectory is valid for 2D)
+        if (isValidTrajectory2D(mean_traj) && !mean_traj.nodes.empty()) {
+            size_t start_idx = std::min(mean_traj.start_index, mean_traj.nodes.size() - 1);
+            size_t goal_idx = std::min(mean_traj.goal_index, mean_traj.nodes.size() - 1);
+            
+            sf::Vector2f start_pos = transform(mean_traj.nodes[start_idx].position(0),
+                                               mean_traj.nodes[start_idx].position(1));
+            sf::Vector2f goal_pos = transform(mean_traj.nodes[goal_idx].position(0),
+                                              mean_traj.nodes[goal_idx].position(1));
 
             // Start (circle)
             sf::CircleShape start_marker(Sizes::startMarker);
@@ -1274,14 +1301,16 @@ private:
         }
 
         // Draw current trajectory
-        for (size_t i = 0; i + 1 < mean_traj.nodes.size(); ++i) {
-            viz3d::Vec3 p1(mean_traj.nodes[i].position(0),
-                           mean_traj.nodes[i].position(1),
-                           mean_traj.nodes[i].position(2));
-            viz3d::Vec3 p2(mean_traj.nodes[i+1].position(0),
-                           mean_traj.nodes[i+1].position(1),
-                           mean_traj.nodes[i+1].position(2));
-            viz3d::drawLine3D(target, cam, p1, p2, 3.0f, Colors::current(), width, height);
+        if (isValidTrajectory3D(mean_traj)) {
+            for (size_t i = 0; i + 1 < mean_traj.nodes.size(); ++i) {
+                viz3d::Vec3 p1(mean_traj.nodes[i].position(0),
+                               mean_traj.nodes[i].position(1),
+                               mean_traj.nodes[i].position(2));
+                viz3d::Vec3 p2(mean_traj.nodes[i+1].position(0),
+                               mean_traj.nodes[i+1].position(1),
+                               mean_traj.nodes[i+1].position(2));
+                viz3d::drawLine3D(target, cam, p1, p2, 3.0f, Colors::current(), width, height);
+            }
         }
 
         // Draw collision spheres if enabled
@@ -1692,8 +1721,35 @@ struct StompOptimizationHistory {
 
 /**
  * @brief Convert STOMP iteration data to visualization IterationData
+ * 
+ * This function works with pce::StompIterationData which may or may not have
+ * collision_cost and smoothness_cost fields depending on the version.
+ * If those fields don't exist, costs default to 0.
+ * 
+ * For the most reliable cost display, access the planner's internal history directly.
  */
-inline IterationData convertIteration(const StompIterationData& stomp_iter) {
+template<typename StompIterType>
+inline IterationData convertIteration(const StompIterType& stomp_iter) {
+    IterationData iter_data;
+    
+    // Core fields that always exist
+    iter_data.iteration = stomp_iter.iteration_number;
+    iter_data.mean_trajectory = stomp_iter.mean_trajectory;
+    iter_data.samples = stomp_iter.samples;
+    iter_data.total_cost = stomp_iter.cost;
+    
+    // Initialize cost components to 0 - they may be overwritten if fields exist
+    // Note: If pce::StompIterationData doesn't have these fields, don't try to access them
+    iter_data.collision_cost = 0.0f;
+    iter_data.smoothness_cost = 0.0f;
+    
+    return iter_data;
+}
+
+/**
+ * @brief Specialized conversion for StompAdapter::StompIterationData (has all cost fields)
+ */
+inline IterationData convertIterationFull(const StompIterationData& stomp_iter) {
     IterationData iter_data;
     
     iter_data.iteration = stomp_iter.iteration_number;
@@ -1709,10 +1765,18 @@ inline IterationData convertIteration(const StompIterationData& stomp_iter) {
 /**
  * @brief Convert complete STOMP history to OptimizationHistory
  * 
+ * Template version works with any type that has an `iterations` member
+ * containing elements compatible with convertIteration().
+ * 
+ * Compatible with:
+ * - StompAdapter::StompOptimizationHistory
+ * - pce::StompOptimizationHistory
+ * 
  * @param stomp_history The STOMP planner's optimization history
  * @return OptimizationHistory compatible with OptimizationVisualizer
  */
-inline OptimizationHistory convert(const StompOptimizationHistory& stomp_history) {
+template<typename StompHistoryType>
+inline OptimizationHistory convert(const StompHistoryType& stomp_history) {
     OptimizationHistory vis_history;
     
     for (const auto& stomp_iter : stomp_history.iterations) {
