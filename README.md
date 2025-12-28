@@ -158,13 +158,24 @@ The library includes three visualization tools for 2D planning scenarios:
 
 ### Visualization Gallery
 
-<p align="center">
-  <img src="Examples2d3d/figures/noise_trj.png" width="300" alt="2D Trajectory Samples">
-  <img src="Examples2d3d/figures/collision.png" width="300" alt="2D Collision Visualization">
-</p>
-<p align="center">
-  <em>Left: Sampled trajectories from smoothness prior. Right: Collision status visualization.</em>
-</p>
+<table style="width: 100%; border-collapse: collapse; border: none;">
+  <tr style="border: none;">
+    <td align="center" style="border: none; width: 50%;">
+      <img src="Examples2d3d/figures/noise_trj.png" width="300" alt="2D Trajectory Samples"><br>
+      <em>(a) Sampled Trajectories (Smoothness Prior)</em>
+    </td>
+    <td align="center" style="border: none; width: 50%;">
+      <img src="Examples2d3d/figures/collision.png" width="300" alt="2D Collision Visualization"><br>
+      <em>(b) Collision Status Visualization</em>
+    </td>
+  </tr>
+  <tr style="border: none;">
+    <td colspan="2" align="center" style="border: none;">
+      <br>
+      <strong>Left: Sampled trajectories from smoothness prior. Right: Collision status visualization.</strong>
+    </td>
+  </tr>
+</table>
 
 <table style="width: 100%; border-collapse: collapse; border: none;">
   <tr style="border: none;">
@@ -219,35 +230,74 @@ These comparisons show the benefit of sampling from a correlated Gaussian for sm
   </tr>
 </table>
 
-<p align="center">
-  <img src="Examples2d3d/figures/noise_trj3d.png" width="300" alt="3D Trajectory Samples">
-  <img src="Examples2d3d/figures/collision3d.png" width="300" alt="3D Collision Visualization">
-</p>
-<p align="center">
-  <em>3D trajectory visualization with interactive rotation and lighting.</em>
-</p>
+<table style="width: 100%; border-collapse: collapse; border: none;">
+  <tr style="border: none;">
+    <td align="center" style="border: none; width: 50%;">
+      <img src="Examples2d3d/figures/noise_trj3d.png" width="300" alt="3D Trajectory Samples"><br>
+      <em>(a) 3D Trajectory Distributions</em>
+    </td>
+    <td align="center" style="border: none; width: 50%;">
+      <img src="Examples2d3d/figures/collision3d.png" width="300" alt="3D Collision Visualization"><br>
+      <em>(b) 3D Collision Map</em>
+    </td>
+  </tr>
+  <tr style="border: none;">
+    <td colspan="2" align="center" style="border: none;">
+      <br>
+      <strong>3D Trajectory Visualization</strong>
+    </td>
+  </tr>
+</table>
 
-<p align="center">
-  <img src="Examples2d3d/figures/pce_anim3d.gif" width="300" alt="PCE 3D Optimization">
-  <img src="Examples2d3d/figures/ngd_anim3d.gif" width="300" alt="NGD 3D Optimization">
-</p>
-<p align="center">
-  <em>3D optimization progression: PCE (left) vs. NGD (right).</em>
-</p>
+<table style="width: 100%; border-collapse: collapse; border: none;">
+  <tr style="border: none;">
+    <td align="center" style="border: none; width: 50%;">
+      <img src="Examples2d3d/figures/pce_anim3d.gif" width="300" alt="PCE 3D Optimization"><br>
+      <em>(a) Proximal Cross Entropy (PCE)</em>
+    </td>
+    <td align="center" style="border: none; width: 50%;">
+      <img src="Examples2d3d/figures/ngd_anim3d.gif" width="300" alt="NGD 3D Optimization"><br>
+      <em>(b) Natural Gradient Descent (NGD)</em>
+    </td>
+  </tr>
+  <tr style="border: none;">
+    <td colspan="2" align="center" style="border: none;">
+      <br>
+      <strong>3D optimization progression: PCE (left) vs. NGD (right).</strong>
+    </td>
+  </tr>
+</table>
 
 ### ROS Integration
 
 MoveIt integration is available at: [https://github.com/hzyu17/pce_ros](https://github.com/hzyu17/pce_ros)
 
-<p align="center">
-  <img src="Examples2d3d/figures/box.webp" width="220" alt="Box">
-  <img src="Examples2d3d/figures/kitchen.webp" width="220" alt="Kitchen">
-  <img src="Examples2d3d/figures/table.webp" width="220" alt="Table">
-  <img src="Examples2d3d/figures/bookshelf.webp" width="220" alt="Bookshelf">
-</p>
-<p align="center">
-  <em>Motion planning for a 7-DOF robot arm across diverse scenarios.</em>
-</p>
+<table style="width: 100%; border-collapse: collapse; border: none;">
+  <tr style="border: none;">
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/box.webp" width="220" alt="Box"><br>
+      <em>(a) Box</em>
+    </td>
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/kitchen.webp" width="220" alt="Kitchen"><br>
+      <em>(b) Kitchen</em>
+    </td>
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/table.webp" width="220" alt="Table"><br>
+      <em>(c) Table</em>
+    </td>
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/bookshelf.webp" width="220" alt="Bookshelf"><br>
+      <em>(d) Bookshelf</em>
+    </td>
+  </tr>
+  <tr style="border: none;">
+    <td colspan="4" align="center" style="border: none;">
+      <br>
+      <strong>Motion planning for a 7-DOF robot arm across diverse scenarios.</strong>
+    </td>
+  </tr>
+</table>
 
 ---
 
