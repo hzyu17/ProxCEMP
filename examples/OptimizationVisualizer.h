@@ -29,7 +29,7 @@
  * - High-resolution export options
  * 
  * Color scheme follows matplotlib default for consistency with Python plots:
- * - Current trajectory: #1f77b4 (blue)
+ * - Current trajectory: #0000ff (pure blue)
  * - Previous trajectories: #aec7e8 (light blue) with alpha gradient
  * - Start marker: #2ca02c (green)
  * - Goal marker: #ff7f0e (orange)
@@ -168,7 +168,6 @@ public:
         bool font_loaded = loadFont(font);
 
         int save_counter = 0;
-        bool show_collision = true;
 
         printCostControls();
 
@@ -188,13 +187,12 @@ public:
                 if (const auto* key = event->getIf<sf::Event::KeyPressed>()) {
                     switch (key->code) {
                         case sf::Keyboard::Key::Escape: window.close(); break;
-                        case sf::Keyboard::Key::C: show_collision = !show_collision; break;
                         case sf::Keyboard::Key::S:
-                            saveCostImage(history, font, font_loaded, show_collision,
+                            saveCostImage(history, font, font_loaded,
                                          save_counter++, 1.0f);
                             break;
                         case sf::Keyboard::Key::P:
-                            saveCostImage(history, font, font_loaded, show_collision,
+                            saveCostImage(history, font, font_loaded,
                                          save_counter++, HIGHRES_SCALE);
                             break;
                         default: break;
@@ -203,7 +201,7 @@ public:
             }
 
             window.clear(sf::Color::White);
-            drawCostFigure(window, history, font, font_loaded, show_collision, true,
+            drawCostFigure(window, history, font, font_loaded, true,
                           current_width, current_height);
             window.display();
         }
@@ -417,7 +415,8 @@ public:
                           const OptimizationHistory& history,
                           bool show_samples, bool show_all_means,
                           const sf::Font& font, bool font_loaded,
-                          int delay_ms = 100) {
+                          int delay_ms = 100,
+                          int final_frames = 8) {
         if (history.iterations.empty()) return;
 
         std::cout << "Saving animation frames...\n";
@@ -428,6 +427,9 @@ public:
         std::string frame_dir = output_prefix_ + "_frames";
         std::system(("mkdir -p " + frame_dir).c_str());
 
+        int frame_num = 0;
+        
+        // Phase 1: Optimization iterations
         for (size_t i = 0; i < history.iterations.size(); ++i) {
             rt.clear(sf::Color::White);
             drawTrajectoryFigure(rt, obstacle_map, history, i, show_samples, show_all_means,
@@ -435,12 +437,25 @@ public:
             rt.display();
 
             std::ostringstream fname;
-            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << i << ".png";
+            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << frame_num++ << ".png";
             rt.getTexture().copyToImage().saveToFile(fname.str());
 
             if ((i + 1) % 10 == 0 || i == history.iterations.size() - 1) {
                 std::cout << "  Frame " << (i + 1) << "/" << history.iterations.size() << "\n";
             }
+        }
+
+        // Phase 2: Final frames with green optimized trajectory
+        std::cout << "  Adding " << final_frames << " final frames (green trajectory)...\n";
+        for (int f = 0; f < final_frames; ++f) {
+            rt.clear(sf::Color::White);
+            drawFinalTrajectoryFrame(rt, obstacle_map, history, font, font_loaded,
+                                     window_width_, window_height_);
+            rt.display();
+
+            std::ostringstream fname;
+            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << frame_num++ << ".png";
+            rt.getTexture().copyToImage().saveToFile(fname.str());
         }
 
         std::string gif_name = output_prefix_ + "_animation.gif";
@@ -502,20 +517,20 @@ private:
     static constexpr float STATIC_SAVE_SCALE = 2.0f;
     static constexpr float GIF_SCALE = 2.0f;
 
-    // === Publication Color Palette (matplotlib default) ===
+    // === Publication Color Palette (optimized for tier-1 conference submissions) ===
     // Note: Different from visualization_base.h colors which are designed for screen viewing
     struct Colors {
-        // Trajectory colors
-        static constexpr auto current()     { return sf::Color(31, 119, 180); }      // #1f77b4
-        static constexpr auto previous()    { return sf::Color(174, 199, 232); }     // #aec7e8
-        static constexpr auto samples()     { return sf::Color(31, 119, 180, 25); }  // transparent blue
+        // Trajectory colors - Pure blue for maximum visibility in print
+        static constexpr auto current()     { return sf::Color(0, 0, 255); }         // Pure blue (#0000ff)
+        static constexpr auto previous()    { return sf::Color(150, 180, 255); }     // Light blue for history
+        static constexpr auto samples()     { return sf::Color(0, 0, 255, 40); }     // Pure blue, semi-transparent
         
         // Marker colors
         static constexpr auto start()       { return sf::Color(44, 160, 44); }       // #2ca02c
         static constexpr auto goal()        { return sf::Color(255, 127, 14); }      // #ff7f0e
         
         // Cost curve colors
-        static constexpr auto total()       { return sf::Color(31, 119, 180); }      // #1f77b4
+        static constexpr auto total()       { return sf::Color(0, 0, 255); }         // Pure blue
         static constexpr auto collision()   { return sf::Color(255, 127, 14); }      // #ff7f0e
         static constexpr auto smoothness()  { return sf::Color(44, 160, 44); }       // #2ca02c
         
@@ -535,38 +550,38 @@ private:
         static constexpr auto inCollision() { return sf::Color(255, 80, 80); }        // Bright red
     };
 
-    // === Typography (publication-quality sizes) ===
+    // === Typography (publication-quality sizes for tier-1 conferences) ===
     struct FontSize {
-        static constexpr unsigned int title = 18;
-        static constexpr unsigned int axisLabel = 15;
-        static constexpr unsigned int tickLabel = 12;
-        static constexpr unsigned int legend = 13;
-        static constexpr unsigned int stats = 12;
-        static constexpr unsigned int hint = 10;
+        static constexpr unsigned int title = 22;
+        static constexpr unsigned int axisLabel = 22;      // Increased for visibility
+        static constexpr unsigned int tickLabel = 16;      // Increased for readability
+        static constexpr unsigned int legend = 16;
+        static constexpr unsigned int stats = 14;
+        static constexpr unsigned int hint = 12;
     };
 
-    // === Layout (margins and spacing) ===
+    // === Layout (margins and spacing - adjusted for larger fonts) ===
     struct Layout {
-        static constexpr float marginLeft = 70.0f;
-        static constexpr float marginRight = 30.0f;
-        static constexpr float marginTop = 55.0f;
-        static constexpr float marginBottom = 60.0f;
-        static constexpr float legendPadding = 10.0f;
-        static constexpr float itemSpacing = 22.0f;
+        static constexpr float marginLeft = 85.0f;         // Increased for larger Y labels
+        static constexpr float marginRight = 35.0f;
+        static constexpr float marginTop = 60.0f;
+        static constexpr float marginBottom = 75.0f;       // Increased for larger X labels
+        static constexpr float legendPadding = 12.0f;
+        static constexpr float itemSpacing = 24.0f;
     };
 
-    // === Line/Marker Sizes ===
+    // === Line/Marker Sizes (thicker for publication clarity) ===
     struct Sizes {
-        static constexpr float currentLine = 3.0f;
+        static constexpr float currentLine = 3.5f;         // Slightly thicker
         static constexpr float previousLine = 2.0f;
         static constexpr float sampleLine = 1.0f;
-        static constexpr float costLine = 2.5f;
-        static constexpr float costLineSecondary = 2.0f;
-        static constexpr float waypoint = 4.0f;
-        static constexpr float startMarker = 10.0f;
-        static constexpr float goalMarker = 12.0f;
-        static constexpr float axisBorder = 1.5f;
-        static constexpr float legendBorder = 1.0f;
+        static constexpr float costLine = 3.0f;            // Thicker for visibility
+        static constexpr float costLineSecondary = 2.5f;
+        static constexpr float waypoint = 5.0f;
+        static constexpr float startMarker = 12.0f;
+        static constexpr float goalMarker = 14.0f;
+        static constexpr float axisBorder = 2.0f;          // Thicker axis border
+        static constexpr float legendBorder = 1.5f;
     };
 
     // === Helper Functions ===
@@ -618,7 +633,6 @@ private:
 
     void printCostControls() {
         std::cout << "\n=== Cost Plot Controls ===\n"
-                  << "C:   Toggle collision cost\n"
                   << "S:   Save PNG (1x)\n"
                   << "P:   Save PNG (4x high-res)\n"
                   << "ESC: Exit\n"
@@ -776,6 +790,158 @@ private:
 
     // === Main Drawing Functions ===
 
+    // Green color for final optimized trajectory
+    static constexpr sf::Color optimizedGreen() { return sf::Color(0, 180, 0); }
+
+    /**
+     * @brief Draw final frame with green optimized trajectory
+     */
+    template<typename RenderTarget>
+    void drawFinalTrajectoryFrame(RenderTarget& target,
+                                   const ObstacleMap& obstacle_map,
+                                   const OptimizationHistory& history,
+                                   const sf::Font& font, bool font_loaded,
+                                   unsigned int width, unsigned int height) {
+        if (history.iterations.empty()) return;
+
+        const auto& final_iter = history.iterations.back();
+        float map_w = obstacle_map.getMapWidth();
+        float map_h = obstacle_map.getMapHeight();
+
+        // Compute plot area
+        float plot_w = width - Layout::marginLeft - Layout::marginRight;
+        float plot_h = height - Layout::marginTop - Layout::marginBottom;
+        float scale = std::min(plot_w / map_w, plot_h / map_h);
+        
+        float plot_actual_w = map_w * scale;
+        float plot_actual_h = map_h * scale;
+        float offset_x = Layout::marginLeft + (plot_w - plot_actual_w) / 2;
+        float offset_y = Layout::marginTop + (plot_h - plot_actual_h) / 2;
+
+        auto transform = [&](float x, float y) -> sf::Vector2f {
+            return {offset_x + x * scale, offset_y + y * scale};
+        };
+
+        // Plot background
+        target.draw(createBox(offset_x, offset_y, plot_actual_w, plot_actual_h,
+                              sf::Color::White, Colors::axis(), Sizes::axisBorder));
+
+        // Obstacles
+        drawObstaclesStyled(target, obstacle_map.getObstacles(), scale, offset_x, offset_y);
+
+        // Draw optimized trajectory in GREEN
+        const auto& mean_traj = final_iter.mean_trajectory;
+        sf::Color green = optimizedGreen();
+        drawThickTrajectory(target, mean_traj, scale, offset_x, offset_y,
+                           green, Sizes::currentLine + 0.5f);  // Slightly thicker
+
+        // Waypoints in green
+        if (isValidTrajectory2D(mean_traj)) {
+            for (size_t i = 1; i + 1 < mean_traj.nodes.size(); ++i) {
+                sf::Vector2f pos = transform(mean_traj.nodes[i].position(0), mean_traj.nodes[i].position(1));
+                sf::CircleShape marker(Sizes::waypoint);
+                marker.setPosition({pos.x - Sizes::waypoint, pos.y - Sizes::waypoint});
+                marker.setFillColor(green);
+                target.draw(marker);
+            }
+        }
+
+        // Start and Goal markers
+        if (isValidTrajectory2D(mean_traj) && !mean_traj.nodes.empty()) {
+            size_t start_idx = std::min(mean_traj.start_index, mean_traj.nodes.size() - 1);
+            size_t goal_idx = std::min(mean_traj.goal_index, mean_traj.nodes.size() - 1);
+            
+            sf::Vector2f start_pos = transform(mean_traj.nodes[start_idx].position(0),
+                                               mean_traj.nodes[start_idx].position(1));
+            sf::Vector2f goal_pos = transform(mean_traj.nodes[goal_idx].position(0),
+                                              mean_traj.nodes[goal_idx].position(1));
+
+            // Start (circle)
+            sf::CircleShape start_marker(Sizes::startMarker);
+            start_marker.setPosition({start_pos.x - Sizes::startMarker, start_pos.y - Sizes::startMarker});
+            start_marker.setFillColor(Colors::start());
+            start_marker.setOutlineColor(sf::Color(25, 100, 25));
+            start_marker.setOutlineThickness(2.0f);
+            target.draw(start_marker);
+
+            // Goal (square)
+            float gs = Sizes::goalMarker;
+            sf::RectangleShape goal_marker({gs, gs});
+            goal_marker.setPosition({goal_pos.x - gs / 2, goal_pos.y - gs / 2});
+            goal_marker.setFillColor(Colors::goal());
+            goal_marker.setOutlineColor(sf::Color(180, 90, 10));
+            goal_marker.setOutlineThickness(2.0f);
+            target.draw(goal_marker);
+        }
+
+        // Labels
+        if (font_loaded) {
+            // X-axis label
+            sf::Text xlabel(font, "X Position", FontSize::axisLabel);
+            xlabel.setFillColor(Colors::text());
+            xlabel.setStyle(sf::Text::Bold);
+            sf::FloatRect xb = xlabel.getLocalBounds();
+            xlabel.setPosition({offset_x + plot_actual_w / 2 - xb.size.x / 2, offset_y + plot_actual_h + 45.0f});
+            target.draw(xlabel);
+
+            // Y-axis label
+            sf::Text ylabel(font, "Y Position", FontSize::axisLabel);
+            ylabel.setFillColor(Colors::text());
+            ylabel.setStyle(sf::Text::Bold);
+            ylabel.setRotation(sf::degrees(-90.0f));
+            ylabel.setPosition({offset_x - 65.0f, offset_y + plot_actual_h / 2 + 40.0f});
+            target.draw(ylabel);
+
+            // Tick labels
+            for (int i = 0; i <= 4; ++i) {
+                float data_x = i * map_w / 4;
+                float data_y = i * map_h / 4;
+                float sx = offset_x + i * plot_actual_w / 4;
+                float sy = offset_y + i * plot_actual_h / 4;
+
+                sf::Text xt(font, std::to_string((int)data_x), FontSize::tickLabel);
+                xt.setFillColor(Colors::text());
+                sf::FloatRect xtb = xt.getLocalBounds();
+                xt.setPosition({sx - xtb.size.x / 2, offset_y + plot_actual_h + 12.0f});
+                target.draw(xt);
+
+                sf::Text yt(font, std::to_string((int)data_y), FontSize::tickLabel);
+                yt.setFillColor(Colors::text());
+                sf::FloatRect ytb = yt.getLocalBounds();
+                yt.setPosition({offset_x - ytb.size.x - 12.0f, sy - 9.0f});
+                target.draw(yt);
+            }
+
+            // Title - "Optimized Trajectory"
+            sf::Text title(font, "Optimized Trajectory", FontSize::title);
+            title.setFillColor(green);
+            title.setStyle(sf::Text::Bold);
+            title.setPosition({offset_x, 15.0f});
+            target.draw(title);
+
+            // Cost display
+            std::ostringstream cost_ss;
+            cost_ss << "Final Cost: " << std::fixed << std::setprecision(2) << final_iter.total_cost;
+            sf::Text cost_text(font, cost_ss.str(), FontSize::axisLabel);
+            cost_text.setFillColor(Colors::text());
+            cost_text.setPosition({offset_x + plot_actual_w - 200.0f, 18.0f});
+            target.draw(cost_text);
+
+            // Legend
+            float lx = offset_x + plot_actual_w - 165.0f;
+            float ly = offset_y + 12.0f;
+            
+            target.draw(createBox(lx, ly, 155.0f, 90.0f, Colors::legendBg(), Colors::legendBorder()));
+
+            float item_y = ly + 10.0f;
+            drawLegendEntry(target, font, lx + 8.0f, item_y, "Optimized", green, Sizes::currentLine);
+            item_y += Layout::itemSpacing;
+            drawLegendMarker(target, font, lx + 8.0f, item_y, "Start", Colors::start(), false);
+            item_y += Layout::itemSpacing;
+            drawLegendMarker(target, font, lx + 8.0f, item_y, "Goal", Colors::goal(), true);
+        }
+    }
+
     template<typename RenderTarget>
     void drawTrajectoryFigure(RenderTarget& target,
                                const ObstacleMap& obstacle_map,
@@ -826,7 +992,7 @@ private:
                 const auto& traj = history.iterations[i].mean_trajectory;
                 float t = (float)i / current_iter;
                 uint8_t alpha = static_cast<uint8_t>(50 + 150 * t);
-                sf::Color col(174, 199, 232, alpha);
+                sf::Color col(150, 180, 255, alpha);  // Light blue gradient
                 drawThickTrajectory(target, traj, scale, offset_x, offset_y,
                                    col, Sizes::previousLine);
             }
@@ -888,18 +1054,20 @@ private:
                                float offset_x, float offset_y, float plot_w, float plot_h,
                                float map_w, float map_h, int current_iter, size_t total_iters,
                                float cost, bool show_hints, unsigned int window_h) {
-        // X-axis label
+        // X-axis label (larger, bold for publication)
         sf::Text xlabel(font, "X Position", FontSize::axisLabel);
         xlabel.setFillColor(Colors::text());
+        xlabel.setStyle(sf::Text::Bold);
         sf::FloatRect xb = xlabel.getLocalBounds();
-        xlabel.setPosition({offset_x + plot_w / 2 - xb.size.x / 2, offset_y + plot_h + 35.0f});
+        xlabel.setPosition({offset_x + plot_w / 2 - xb.size.x / 2, offset_y + plot_h + 45.0f});
         target.draw(xlabel);
 
-        // Y-axis label
+        // Y-axis label (larger, bold for publication)
         sf::Text ylabel(font, "Y Position", FontSize::axisLabel);
         ylabel.setFillColor(Colors::text());
+        ylabel.setStyle(sf::Text::Bold);
         ylabel.setRotation(sf::degrees(-90.0f));
-        ylabel.setPosition({offset_x - 50.0f, offset_y + plot_h / 2 + 35.0f});
+        ylabel.setPosition({offset_x - 65.0f, offset_y + plot_h / 2 + 40.0f});
         target.draw(ylabel);
 
         // Tick labels
@@ -912,13 +1080,13 @@ private:
             sf::Text xt(font, std::to_string((int)data_x), FontSize::tickLabel);
             xt.setFillColor(Colors::text());
             sf::FloatRect xtb = xt.getLocalBounds();
-            xt.setPosition({sx - xtb.size.x / 2, offset_y + plot_h + 10.0f});
+            xt.setPosition({sx - xtb.size.x / 2, offset_y + plot_h + 12.0f});
             target.draw(xt);
 
             sf::Text yt(font, std::to_string((int)data_y), FontSize::tickLabel);
             yt.setFillColor(Colors::text());
             sf::FloatRect ytb = yt.getLocalBounds();
-            yt.setPosition({offset_x - ytb.size.x - 10.0f, sy - 7.0f});
+            yt.setPosition({offset_x - ytb.size.x - 12.0f, sy - 9.0f});
             target.draw(yt);
         }
 
@@ -928,7 +1096,7 @@ private:
         sf::Text title(font, title_ss.str(), FontSize::title);
         title.setFillColor(Colors::text());
         title.setStyle(sf::Text::Bold);
-        title.setPosition({offset_x, 18.0f});
+        title.setPosition({offset_x, 15.0f});
         target.draw(title);
 
         // Cost display
@@ -936,14 +1104,14 @@ private:
         cost_ss << "Cost: " << std::fixed << std::setprecision(2) << cost;
         sf::Text cost_text(font, cost_ss.str(), FontSize::axisLabel);
         cost_text.setFillColor(Colors::text());
-        cost_text.setPosition({offset_x + plot_w - 130.0f, 20.0f});
+        cost_text.setPosition({offset_x + plot_w - 160.0f, 18.0f});
         target.draw(cost_text);
 
-        // Legend
-        float lx = offset_x + plot_w - 150.0f;
+        // Legend (adjusted for larger fonts)
+        float lx = offset_x + plot_w - 165.0f;
         float ly = offset_y + 12.0f;
         
-        target.draw(createBox(lx, ly, 140.0f, 100.0f, Colors::legendBg(), Colors::legendBorder()));
+        target.draw(createBox(lx, ly, 155.0f, 115.0f, Colors::legendBg(), Colors::legendBorder()));
 
         float item_y = ly + 10.0f;
         drawLegendEntry(target, font, lx + 8.0f, item_y, "Current", Colors::current(), Sizes::currentLine);
@@ -958,7 +1126,7 @@ private:
         if (show_hints) {
             sf::Text hint(font, "S/P: Save PNG | G: Save GIF | Space: Play", FontSize::hint);
             hint.setFillColor(Colors::hint());
-            hint.setPosition({12.0f, window_h - 22.0f});
+            hint.setPosition({12.0f, window_h - 25.0f});
             target.draw(hint);
         }
     }
@@ -967,7 +1135,6 @@ private:
     void drawCostFigure(RenderTarget& target,
                         const OptimizationHistory& history,
                         const sf::Font& font, bool font_loaded,
-                        bool show_collision,
                         bool show_hints,
                         unsigned int width, unsigned int height) {
         if (history.iterations.empty()) return;
@@ -980,7 +1147,6 @@ private:
         float plot_h = plot_bottom - plot_top;
 
         auto costs = history.getCostHistory();
-        auto collision_costs = history.getCollisionCostHistory();
 
         // Compute Y-axis range
         float max_cost = *std::max_element(costs.begin(), costs.end());
@@ -1011,27 +1177,20 @@ private:
             target.draw(vline);
         }
 
-        // Draw curves
-        auto drawCurve = [&](const std::vector<float>& data, sf::Color color, float width) {
-            if (data.size() < 2) return;
-            for (size_t i = 0; i + 1 < data.size(); ++i) {
-                float x1 = plot_left + (float)i / (data.size() - 1) * plot_w;
-                float x2 = plot_left + (float)(i + 1) / (data.size() - 1) * plot_w;
-                float y1 = plot_bottom - (data[i] - min_cost) / range * plot_h;
-                float y2 = plot_bottom - (data[i + 1] - min_cost) / range * plot_h;
-                drawThickLine(target, {x1, y1}, {x2, y2}, width, color);
+        // Draw total cost curve only
+        if (costs.size() >= 2) {
+            for (size_t i = 0; i + 1 < costs.size(); ++i) {
+                float x1 = plot_left + (float)i / (costs.size() - 1) * plot_w;
+                float x2 = plot_left + (float)(i + 1) / (costs.size() - 1) * plot_w;
+                float y1 = plot_bottom - (costs[i] - min_cost) / range * plot_h;
+                float y2 = plot_bottom - (costs[i + 1] - min_cost) / range * plot_h;
+                drawThickLine(target, {x1, y1}, {x2, y2}, Sizes::costLine, Colors::total());
             }
-        };
-
-        bool has_collision = show_collision && 
-            std::any_of(collision_costs.begin(), collision_costs.end(), [](float c) { return c > 1e-6f; });
-
-        if (has_collision) drawCurve(collision_costs, Colors::collision(), Sizes::costLineSecondary);
-        drawCurve(costs, Colors::total(), Sizes::costLine);
+        }
 
         if (font_loaded) {
             drawCostLabels(target, font, plot_left, plot_top, plot_w, plot_h,
-                          min_cost, max_cost, range, costs, has_collision, show_hints, height);
+                          min_cost, max_cost, range, costs, show_hints, height);
         }
     }
 
@@ -1040,26 +1199,28 @@ private:
                         float plot_left, float plot_top, float plot_w, float plot_h,
                         float min_cost, float max_cost, float range,
                         const std::vector<float>& costs,
-                        bool has_collision, bool show_hints, unsigned int window_h) {
+                        bool show_hints, unsigned int window_h) {
         // Title
         sf::Text title(font, "Cost Convergence", FontSize::title);
         title.setFillColor(Colors::text());
         title.setStyle(sf::Text::Bold);
-        title.setPosition({plot_left, 18.0f});
+        title.setPosition({plot_left, 15.0f});
         target.draw(title);
 
-        // X-axis label
+        // X-axis label (larger, bold for publication)
         sf::Text xlabel(font, "Iteration", FontSize::axisLabel);
         xlabel.setFillColor(Colors::text());
+        xlabel.setStyle(sf::Text::Bold);
         sf::FloatRect xb = xlabel.getLocalBounds();
-        xlabel.setPosition({plot_left + plot_w / 2 - xb.size.x / 2, plot_top + plot_h + 38.0f});
+        xlabel.setPosition({plot_left + plot_w / 2 - xb.size.x / 2, plot_top + plot_h + 48.0f});
         target.draw(xlabel);
 
-        // Y-axis label
+        // Y-axis label (larger, bold for publication)
         sf::Text ylabel(font, "Cost", FontSize::axisLabel);
         ylabel.setFillColor(Colors::text());
+        ylabel.setStyle(sf::Text::Bold);
         ylabel.setRotation(sf::degrees(-90.0f));
-        ylabel.setPosition({22.0f, plot_top + plot_h / 2 + 15.0f});
+        ylabel.setPosition({18.0f, plot_top + plot_h / 2 + 20.0f});
         target.draw(ylabel);
 
         // Y tick labels
@@ -1072,7 +1233,7 @@ private:
             sf::Text label(font, ss.str(), FontSize::tickLabel);
             label.setFillColor(Colors::text());
             sf::FloatRect lb = label.getLocalBounds();
-            label.setPosition({plot_left - lb.size.x - 10.0f, y - 7.0f});
+            label.setPosition({plot_left - lb.size.x - 12.0f, y - 9.0f});
             target.draw(label);
         }
 
@@ -1084,30 +1245,15 @@ private:
             sf::Text label(font, std::to_string(iter + 1), FontSize::tickLabel);
             label.setFillColor(Colors::text());
             sf::FloatRect lb = label.getLocalBounds();
-            label.setPosition({x - lb.size.x / 2, plot_top + plot_h + 10.0f});
+            label.setPosition({x - lb.size.x / 2, plot_top + plot_h + 12.0f});
             target.draw(label);
         }
 
-        // Legend
-        float lx = plot_left + plot_w - 155.0f;
-        float ly = plot_top + 12.0f;
-        float legend_h = 35.0f + (has_collision ? Layout::itemSpacing : 0.0f);
-        
-        target.draw(createBox(lx, ly, 145.0f, legend_h, Colors::legendBg(), Colors::legendBorder()));
-
-        float item_y = ly + 10.0f;
-        drawLegendEntry(target, font, lx + 8.0f, item_y, "Total Cost", Colors::total(), Sizes::costLine);
-        
-        if (has_collision) {
-            item_y += Layout::itemSpacing;
-            drawLegendEntry(target, font, lx + 8.0f, item_y, "Collision", Colors::collision(), Sizes::costLineSecondary);
-        }
-
-        // Stats box
+        // Stats box (adjusted for larger fonts)
         float sx = plot_left + 12.0f;
         float sy = plot_top + 12.0f;
         
-        target.draw(createBox(sx, sy, 155.0f, 78.0f,
+        target.draw(createBox(sx, sy, 175.0f, 88.0f,
                               sf::Color(248, 250, 255, 248), Colors::legendBorder()));
 
         float stat_y = sy + 10.0f;
@@ -1123,14 +1269,14 @@ private:
             t.setFillColor(Colors::text());
             t.setPosition({sx + 10.0f, stat_y});
             target.draw(t);
-            stat_y += 20.0f;
+            stat_y += 24.0f;
         }
 
         // Interactive hints
         if (show_hints) {
-            sf::Text hint(font, "S/P: Save PNG | C: Toggle Collision", FontSize::hint);
+            sf::Text hint(font, "S/P: Save PNG", FontSize::hint);
             hint.setFillColor(Colors::hint());
-            hint.setPosition({12.0f, window_h - 22.0f});
+            hint.setPosition({12.0f, window_h - 25.0f});
             target.draw(hint);
         }
     }
@@ -1283,7 +1429,7 @@ private:
                 const auto& traj = history.iterations[i].mean_trajectory;
                 float t = (float)i / current_iter;
                 uint8_t alpha = static_cast<uint8_t>(50 + 150 * t);
-                sf::Color col(174, 199, 232, alpha);
+                sf::Color col(150, 180, 255, alpha);  // Light blue gradient
 
                 for (size_t j = 0; j + 1 < traj.nodes.size(); ++j) {
                     if (traj.nodes[j].position.size() >= 3 &&
@@ -1341,8 +1487,8 @@ private:
             // Draw collision status box
             if (font_loaded) {
                 float sx = 15.0f;
-                float sy = height - 100.0f;
-                target.draw(createBox(sx, sy, 160.0f, 70.0f,
+                float sy = height - 110.0f;
+                target.draw(createBox(sx, sy, 175.0f, 80.0f,
                                       sf::Color(248, 250, 255, 248), Colors::legendBorder()));
                 
                 std::ostringstream ss1, ss2, ss3;
@@ -1352,17 +1498,17 @@ private:
                 
                 sf::Text t1(font, ss1.str(), FontSize::stats);
                 t1.setFillColor(collision_count > 0 ? Colors::inCollision() : Colors::text());
-                t1.setPosition({sx + 12.0f, sy + 10.0f});
+                t1.setPosition({sx + 12.0f, sy + 12.0f});
                 target.draw(t1);
                 
                 sf::Text t2(font, ss2.str(), FontSize::stats);
                 t2.setFillColor(near_count > 0 ? Colors::nearCollision() : Colors::text());
-                t2.setPosition({sx + 12.0f, sy + 30.0f});
+                t2.setPosition({sx + 12.0f, sy + 34.0f});
                 target.draw(t2);
                 
                 sf::Text t3(font, ss3.str(), FontSize::stats);
                 t3.setFillColor(Colors::safe());
-                t3.setPosition({sx + 12.0f, sy + 50.0f});
+                t3.setPosition({sx + 12.0f, sy + 56.0f});
                 target.draw(t3);
             }
         } else {
@@ -1408,29 +1554,29 @@ private:
             target.draw(title);
 
             // Legend - expanded when showing collision spheres
-            float lx = width - (show_collision_spheres ? 175.0f : 130.0f);
+            float lx = width - (show_collision_spheres ? 195.0f : 145.0f);
             float ly = 15.0f;
-            float legend_h = show_collision_spheres ? 155.0f : 90.0f;
-            float legend_w = show_collision_spheres ? 160.0f : 115.0f;
+            float legend_h = show_collision_spheres ? 175.0f : 100.0f;
+            float legend_w = show_collision_spheres ? 180.0f : 130.0f;
             target.draw(createBox(lx, ly, legend_w, legend_h, Colors::legendBg(), Colors::legendBorder()));
 
             float item_y = ly + 10.0f;
             
             if (show_collision_spheres) {
                 drawLegendMarker(target, font, lx + 8.0f, item_y, "Safe", Colors::safe(), false);
-                item_y += 18.0f;
+                item_y += 22.0f;
                 drawLegendMarker(target, font, lx + 8.0f, item_y, "Near collision", Colors::nearCollision(), false);
-                item_y += 18.0f;
+                item_y += 22.0f;
                 drawLegendMarker(target, font, lx + 8.0f, item_y, "In collision", Colors::inCollision(), false);
-                item_y += 18.0f;
+                item_y += 22.0f;
                 drawLegendMarker(target, font, lx + 8.0f, item_y, "Obstacles", viz3d::colors::obstacle(), false);
-                item_y += 18.0f;
+                item_y += 22.0f;
             }
             
             drawLegendEntry(target, font, lx + 8.0f, item_y, "Current", Colors::current(), 2.5f);
-            item_y += 18.0f;
+            item_y += 22.0f;
             drawLegendMarker(target, font, lx + 8.0f, item_y, "Start", Colors::start(), false);
-            item_y += 18.0f;
+            item_y += 22.0f;
             drawLegendMarker(target, font, lx + 8.0f, item_y, "Goal", Colors::goal(), false);
 
             // Hints
@@ -1438,9 +1584,111 @@ private:
                 sf::Text hint(font, "Drag: Rotate | Scroll: Zoom | Space: Play | R: Auto-rotate",
                              FontSize::hint);
                 hint.setFillColor(Colors::hint());
-                hint.setPosition({15.0f, height - 25.0f});
+                hint.setPosition({15.0f, height - 28.0f});
                 target.draw(hint);
             }
+        }
+    }
+
+    /**
+     * @brief Draw 3D final frame with green optimized trajectory
+     */
+    template<typename RenderTarget>
+    void draw3DFinalTrajectoryFrame(RenderTarget& target,
+                                     const ObstacleMap& obstacle_map,
+                                     const OptimizationHistory& history,
+                                     const viz3d::Camera3D& cam,
+                                     const sf::Font& font, bool font_loaded,
+                                     unsigned int width, unsigned int height,
+                                     const viz3d::Vec3& minB, const viz3d::Vec3& maxB) {
+        if (history.iterations.empty()) return;
+
+        const auto& final_iter = history.iterations.back();
+        const auto& mean_traj = final_iter.mean_trajectory;
+
+        if (mean_traj.nodes.empty() || mean_traj.nodes[0].position.size() < 3) return;
+
+        // Background gradient
+        viz3d::drawGradientBackground(target, width, height);
+
+        // Grid and axes
+        viz3d::drawGrid(target, cam, minB, maxB, 10, width, height);
+        float axisLen = (maxB - minB).length() * 0.15f;
+        viz3d::drawAxes(target, cam, minB, axisLen, width, height, font_loaded ? &font : nullptr);
+
+        // Compute depth range
+        float minDepth = cam.getDepth(cam.center) - (maxB - minB).length();
+        float maxDepth = cam.getDepth(cam.center) + (maxB - minB).length();
+
+        // Draw obstacles
+        for (const auto& obs : obstacle_map.getObstacles()) {
+            if (obs.dimensions() >= 3) {
+                viz3d::Vec3 pos(obs.center(0), obs.center(1), obs.center(2));
+                viz3d::drawCircle3D(target, cam, pos, obs.radius,
+                                    viz3d::colors::obstacle(), width, height,
+                                    true, minDepth, maxDepth);
+            }
+        }
+
+        // Draw optimized trajectory in GREEN
+        sf::Color green = optimizedGreen();
+        if (isValidTrajectory3D(mean_traj)) {
+            for (size_t i = 0; i + 1 < mean_traj.nodes.size(); ++i) {
+                viz3d::Vec3 p1(mean_traj.nodes[i].position(0),
+                               mean_traj.nodes[i].position(1),
+                               mean_traj.nodes[i].position(2));
+                viz3d::Vec3 p2(mean_traj.nodes[i+1].position(0),
+                               mean_traj.nodes[i+1].position(1),
+                               mean_traj.nodes[i+1].position(2));
+                viz3d::drawLine3D(target, cam, p1, p2, 4.0f, green, width, height);
+            }
+
+            // Waypoints in green
+            for (size_t i = 1; i + 1 < mean_traj.nodes.size(); ++i) {
+                viz3d::Vec3 pos(mean_traj.nodes[i].position(0),
+                                mean_traj.nodes[i].position(1),
+                                mean_traj.nodes[i].position(2));
+                viz3d::drawCircle3D(target, cam, pos, 4.0f, green,
+                                    width, height, false, minDepth, maxDepth);
+            }
+        }
+
+        // Draw start and goal markers
+        if (!mean_traj.nodes.empty()) {
+            const auto& start_node = mean_traj.nodes[mean_traj.start_index];
+            const auto& goal_node = mean_traj.nodes[mean_traj.goal_index];
+
+            viz3d::Vec3 start_pos(start_node.position(0), start_node.position(1), start_node.position(2));
+            viz3d::Vec3 goal_pos(goal_node.position(0), goal_node.position(1), goal_node.position(2));
+
+            viz3d::drawCircle3D(target, cam, start_pos, 8.0f, Colors::start(),
+                                width, height, true, minDepth, maxDepth);
+            viz3d::drawCircle3D(target, cam, goal_pos, 8.0f, Colors::goal(),
+                                width, height, true, minDepth, maxDepth);
+        }
+
+        // Draw UI overlay
+        if (font_loaded) {
+            // Title - "Optimized Trajectory" in green
+            std::ostringstream title_ss;
+            title_ss << "Optimized Trajectory  |  Final Cost: " << std::fixed << std::setprecision(2) << final_iter.total_cost;
+            sf::Text title(font, title_ss.str(), FontSize::title);
+            title.setFillColor(green);
+            title.setStyle(sf::Text::Bold);
+            title.setPosition({15.0f, 12.0f});
+            target.draw(title);
+
+            // Legend
+            float lx = width - 145.0f;
+            float ly = 15.0f;
+            target.draw(createBox(lx, ly, 130.0f, 100.0f, Colors::legendBg(), Colors::legendBorder()));
+
+            float item_y = ly + 10.0f;
+            drawLegendEntry(target, font, lx + 8.0f, item_y, "Optimized", green, 3.0f);
+            item_y += 22.0f;
+            drawLegendMarker(target, font, lx + 8.0f, item_y, "Start", Colors::start(), false);
+            item_y += 22.0f;
+            drawLegendMarker(target, font, lx + 8.0f, item_y, "Goal", Colors::goal(), false);
         }
     }
 
@@ -1489,7 +1737,8 @@ private:
                             const sf::Font& font, bool font_loaded,
                             int delay_ms = 100,
                             int collision_frames = 5,      // Frames with collision view at start/end
-                            float collision_threshold = 10.0f) {
+                            float collision_threshold = 10.0f,
+                            int final_green_frames = 8) {
         if (history.iterations.empty()) return;
 
         std::cout << "Saving 3D animation frames (with collision visualization)...\n";
@@ -1517,7 +1766,6 @@ private:
         std::system(("mkdir -p " + frame_dir).c_str());
 
         int frame_num = 0;
-        size_t total_frames = collision_frames + history.iterations.size() + collision_frames;
         
         // Phase 1: Initial trajectory with collision visualization (static, first iteration)
         std::cout << "  Phase 1: Initial collision view (" << collision_frames << " frames)\n";
@@ -1557,7 +1805,7 @@ private:
             }
         }
 
-        // Phase 3: Final trajectory with collision visualization (static, last iteration)
+        // Phase 3: Final trajectory with collision visualization
         std::cout << "  Phase 3: Final collision view (" << collision_frames << " frames)\n";
         int last_iter = history.iterations.size() - 1;
         for (int f = 0; f < collision_frames; ++f) {
@@ -1565,6 +1813,22 @@ private:
             draw3DTrajectoryFigure(rt, obstacle_map, history, last_iter, false, false,
                                    cam, font, font_loaded, false, width_3d, height_3d, minB, maxB,
                                    true, collision_threshold);  // show_collision_spheres = true
+            rt.display();
+
+            std::ostringstream fname;
+            fname << frame_dir << "/frame_" << std::setfill('0') << std::setw(4) << frame_num++ << ".png";
+            rt.getTexture().copyToImage().saveToFile(fname.str());
+            
+            // Slight rotation
+            cam.rotate(0.015f, 0);
+        }
+
+        // Phase 4: Green optimized trajectory
+        std::cout << "  Phase 4: Green optimized trajectory (" << final_green_frames << " frames)\n";
+        for (int f = 0; f < final_green_frames; ++f) {
+            rt.clear(sf::Color::White);
+            draw3DFinalTrajectoryFrame(rt, obstacle_map, history, cam,
+                                       font, font_loaded, width_3d, height_3d, minB, maxB);
             rt.display();
 
             std::ostringstream fname;
@@ -1653,13 +1917,12 @@ private:
 
     void saveCostImage(const OptimizationHistory& history,
                        const sf::Font& font, bool font_loaded,
-                       bool show_collision,
                        int counter, float scale) {
         sf::RenderTexture rt;
         if (!createRenderTexture(rt, scale)) return;
 
         rt.clear(sf::Color::White);
-        drawCostFigure(rt, history, font, font_loaded, show_collision, false,
+        drawCostFigure(rt, history, font, font_loaded, false,
                       window_width_, window_height_);
         rt.display();
 

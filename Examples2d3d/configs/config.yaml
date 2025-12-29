@@ -134,11 +134,11 @@ stomp:
 pce_planner:
   num_iterations: 50
   num_samples: 500
-  elite_ratio: 0.1
-  temperature: 1.0
-  temperature_final: 0.02
-  eta: 1.5
-  ema_alpha: 0.2
+  elite_ratio: 0.05
+  temperature: 5.0
+  temperature_final: 1.0
+  eta: 0.5
+  ema_alpha: 0.1
   covariance_schedule: cosine
   cov_scale_initial: 10.0
   cov_scale_final: 0.1
@@ -146,11 +146,11 @@ pce_planner:
 # --- NGD (Natural Gradient Descent) Planner ---
 ngd_planner:
   num_iterations: 50
-  num_samples: 100
-  learning_rate: 1e-4
-  temperature: 1.5
-  temperature_final: 0.05
-  ema_alpha: 0.5
+  num_samples: 500
+  learning_rate: 5e-6
+  temperature: 1.0
+  temperature_final: 0.1
+  ema_alpha: 0.3
   covariance_schedule: cosine
-  cov_scale_initial: 1.0
-  cov_scale_final: 0.01
+  cov_scale_initial: 10.0
+  cov_scale_final: 0.1
