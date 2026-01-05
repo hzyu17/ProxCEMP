@@ -513,9 +513,13 @@ private:
                   << "), goal=(" << goal(0) << ", " << goal(1) 
                   << "), timesteps=" << config_.num_timesteps << "\n";
         
+        // Get collision radius from task
+        float node_radius = collision_task_ ? collision_task_->getNodeCollisionRadius() : 15.0f;
+
         for (size_t t = 0; t < config_.num_timesteps; ++t) {
             float alpha = static_cast<float>(t) / (config_.num_timesteps - 1);
             current_trajectory_.nodes[t].position = (1.0f - alpha) * start + alpha * goal;
+            current_trajectory_.nodes[t].radius = node_radius;  // Set collision radius!
         }
         
         // Set start and goal indices for visualization
@@ -540,12 +544,16 @@ private:
         size_t num_dims = params.rows();
         size_t num_timesteps = params.cols();
         
+        // Get collision radius from task
+        float node_radius = collision_task_ ? collision_task_->getNodeCollisionRadius() : 15.0f;
+
         traj.nodes.resize(num_timesteps);
         for (size_t t = 0; t < num_timesteps; ++t) {
             traj.nodes[t].position.resize(num_dims);
             for (size_t d = 0; d < num_dims; ++d) {
                 traj.nodes[t].position(d) = static_cast<float>(params(d, t));
             }
+            traj.nodes[t].radius = node_radius;  // Set collision radius!
         }
         
         // Set start and goal indices for visualization

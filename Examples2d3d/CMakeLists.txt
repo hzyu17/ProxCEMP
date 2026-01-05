@@ -56,15 +56,36 @@ include_directories(SYSTEM ${CASADI_INCLUDE_DIR})
 link_directories(${CASADI_LIBRARY_DIR})
 
 # =============================================================================
+# STOMP Detection
+# =============================================================================
+find_path(STOMP_INCLUDE_DIR 
+    NAMES stomp/stomp.h
+    PATHS 
+        ${CMAKE_CURRENT_SOURCE_DIR}/../external/stomp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../stomp/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stomp/include
+        /usr/local/include
+        /usr/include
+)
+
+if(STOMP_INCLUDE_DIR)
+    message(STATUS "STOMP headers found: ${STOMP_INCLUDE_DIR}")
+else()
+    message(WARNING "STOMP headers not found! Set STOMP_INCLUDE_DIR manually if needed.")
+    # Fallback: assume stomp is a target that provides its own include dirs
+    set(STOMP_INCLUDE_DIR "")
+endif()
+
+# =============================================================================
 # Define Target Groups
 # =============================================================================
 
 # CasADi targets - CANNOT use ASan (incompatible with IPOPT plugin)
 # These are SKIPPED when ENABLE_STOMP_ASAN=ON
-set(CASADI_TARGETS main_casadi main main3d)
+set(CASADI_TARGETS main_casadi main_casadi3d main main3d)
 
 # STOMP/PCE/NGD targets - use ASan when ENABLE_STOMP_ASAN=ON
-set(STOMP_TARGETS main_stomp main_mute)
+set(STOMP_TARGETS main_stomp main_stomp3d main_mute)
 
 # Visualization targets - use ASan when ENABLE_STOMP_ASAN=ON
 set(VIZ_TARGETS visualize_collision visualize_collision3d visualize_noisy_trj visualize_noisy_trj3d)
@@ -75,6 +96,7 @@ set(VIZ_TARGETS visualize_collision visualize_collision3d visualize_noisy_trj vi
 set(COMMON_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../examples
+    ${STOMP_INCLUDE_DIR}
 )
 
 set(COMMON_LIBS
@@ -195,6 +217,7 @@ message(STATUS "")
 message(STATUS "=== Examples2d3d Configuration Summary ===")
 message(STATUS "SFML: Found")
 message(STATUS "CasADi library: ${CASADI_LIBRARY}")
+message(STATUS "STOMP include: ${STOMP_INCLUDE_DIR}")
 message(STATUS "ENABLE_STOMP_ASAN: ${ENABLE_STOMP_ASAN}")
 message(STATUS "")
 if(ENABLE_STOMP_ASAN)

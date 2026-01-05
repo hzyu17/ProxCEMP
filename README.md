@@ -251,19 +251,53 @@ These comparisons show the benefit of sampling from a correlated Gaussian for sm
 
 <table style="width: 100%; border-collapse: collapse; border: none;">
   <tr style="border: none;">
-    <td align="center" style="border: none; width: 50%;">
+    <td align="center" style="border: none; width: 33%;">
       <img src="Examples2d3d/figures/pce_anim3d.gif" width="300" alt="PCE 3D Optimization"><br>
-      <em>(a) Proximal Cross Entropy (PCE)</em>
+      <em>(a) PCE</em>
     </td>
-    <td align="center" style="border: none; width: 50%;">
+    <td align="center" style="border: none; width: 33%;">
       <img src="Examples2d3d/figures/ngd_anim3d.gif" width="300" alt="NGD 3D Optimization"><br>
-      <em>(b) Natural Gradient Descent (NGD)</em>
+      <em>(b) NGD</em>
+    </td>
+    <td align="center" style="border: none; width: 33%;">
+      <img src="Examples2d3d/figures/STOMP_anim3d.gif" width="300" alt="STOMP 3D Optimization"><br>
+      <em>(c) STOMP</em>
     </td>
   </tr>
   <tr style="border: none;">
     <td colspan="2" align="center" style="border: none;">
       <br>
       <strong>3D optimization progression: PCE (left) vs. NGD (right).</strong>
+    </td>
+  </tr>
+</table>
+
+
+<table style="width: 100%; border-collapse: collapse; border: none;">
+  <tr style="border: none;">
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/L-BFGS_anim3d.gif" width="300" alt="L-BFGS"><br>
+      <em>L-BFGS</em>
+    </td>
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/IPOPT_anim3d.gif" width="300" alt="IPOPT"><br>
+      <em>IPOPT</em>
+    </td>
+  </tr>
+  <tr style="border: none;">
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/SQP_anim3d.gif" width="300" alt="SQP"><br>
+      <em>SQP</em>
+    </td>
+    <td align="center" style="border: none;">
+      <img src="Examples2d3d/figures/GD_anim3d.gif" width="300" alt="Gradient Descent"><br>
+      <em>Gradient Descent</em>
+    </td>
+  </tr>
+  <tr style="border: none;">
+    <td colspan="2" align="center" style="border: none;">
+      <br>
+      <strong>Optimization progression with CasADi solvers: L-BFGS, IPOPT, SQP, and Gradient Descent.</strong>
     </td>
   </tr>
 </table>
