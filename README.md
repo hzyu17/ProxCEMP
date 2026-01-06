@@ -495,5 +495,5 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
   [DOI: 10.1177/0278364918790369](https://journals.sagepub.com/doi/full/10.1177/0278364918790369)
 
 - **GVIMP**: Gaussian Variational Inference for Motion Planning  
-  H. Yu, Y. Chen, and S. Hutchinson, *IEEE Robot. Autom. Lett.*, vol. 8, no. 5, pp. 2518–2525, 2023.  
+  H. Yu, Y. Chen *IEEE Robot. Autom. Lett.*, vol. 8, no. 5, pp. 2518–2525, 2023.  
   [DOI: 10.1109/LRA.2023.3257677](https://ieeexplore.ieee.org/abstract/document/10068240)
