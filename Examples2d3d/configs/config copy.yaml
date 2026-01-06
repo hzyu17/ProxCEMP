@@ -139,18 +139,18 @@ pce_planner:
   # ---------------------------------------------------------------------------
   num_iterations: 50               # Maximum optimization iterations
   num_samples: 500                 # Number of trajectory samples per iteration
-  elite_ratio: 0.8                # Fraction of samples to use as elites (0.0-1.0)
+  elite_ratio: 0.05                # Fraction of samples to use as elites (0.0-1.0)
   
   # --- Temperature Schedule ---
   # Controls exploration vs exploitation tradeoff
   # Higher temperature = more uniform weighting across samples
-  temperature: 1.0                 # Initial temperature
-  temperature_final: 0.5         # Final temperature (annealed over iterations)
+  temperature: 5.0                 # Initial temperature
+  temperature_final: 1.0           # Final temperature (annealed over iterations)
   
   # --- Update Parameters ---
-  eta: 1.0                         # Proximal regularization strength
+  eta: 0.5                         # Proximal regularization strength
                                    # gamma = eta / (eta + 1) is auto-computed
-  ema_alpha: 0.5                   # Exponential moving average blend factor
+  ema_alpha: 0.1                   # Exponential moving average blend factor
                                    # 0 = keep old trajectory, 1 = use new weighted mean
   
   # --- Convergence ---
@@ -164,7 +164,7 @@ pce_planner:
   # Controls noise magnitude for exploration
   covariance_schedule: cosine      # Options: constant, linear, exponential, cosine, step, adaptive
   cov_scale_initial: 10.0          # Initial noise scale
-  cov_scale_final: 1.0             # Final noise scale
+  cov_scale_final: 0.1             # Final noise scale
   cov_decay_rate: 0.9              # Decay rate for exponential schedule
   cov_step_interval: 5             # Interval for step schedule
   cov_step_factor: 0.5             # Factor for step schedule

@@ -1,78 +1,27 @@
+# =============================================================================
 # 3D Motion Planning Configuration
 # Adapted from 2D configuration for 3D trajectory optimization
+# =============================================================================
 
-casadi_planner:
-  adam:
-    beta1: 0.9
-    beta2: 0.999
-    epsilon: 1e-8
-    learning_rate: 0.01
-  collision_weight: 10.0
-  finite_diff_eps: 1e-4
-  gradient_descent:
-    learning_rate: 0.001
-    lr_decay: 1.0
-    momentum: 0.9
-    use_nesterov: true
-  ipopt:
-    acceptable_iter: 5
-    acceptable_tol: 1e-4
-    hessian_approximation: limited-memory
-    linear_solver: mumps
-    max_cpu_time: 120.0           # Increased for 3D complexity
-    print_level: 0
-    warm_start_init_point: 'yes'
-  lbfgs:
-    max_iterations: 100
-    history_size: 10
-  max_iterations: 500
-  scp:
-    accept_ratio: 0.1
-    convergence_tol: 1e-4
-    good_ratio: 0.75
-    inner_max_iter: 100
-    max_outer_iter: 50
-    trust_expand: 2.0
-    trust_region_init: 10.0
-    trust_region_max: 1000.0
-    trust_region_min: 1e-4
-    trust_shrink: 0.5
-  solver: ipopt
-  sqp:
-    beta: 0.5
-    c1: 1e-4
-    hessian_approximation: bfgs
-    max_iter_ls: 20
-    qp_solver: qpoases
-    tolerance: 1e-6
-
-  # --- Gradient Descent Parameters ---
-  gradient_descent:
-    learning_rate: 0.8           # Step size (reduced for stability)
-    momentum: 0.9                  # Momentum coefficient
-    use_nesterov: true             # Use Nesterov accelerated gradient
-    lr_decay: 1.0                  # Learning rate decay (1.0 = no decay)
-
-  # --- Adam Parameters ---
-  adam:
-    learning_rate: 0.8            # Step size
-    beta1: 0.9                     # First moment decay
-    beta2: 0.999                   # Second moment decay
-    epsilon: 1e-8                  # Numerical stability constant
-  verbose_solver: true
-  max_iterations: 5000
-
+# -----------------------------------------------------------------------------
+# Environment Settings (3D)
+# -----------------------------------------------------------------------------
 environment:
+  # 3D workspace dimensions
+  map_width: 800                  # X dimension
+  map_height: 600                 # Y dimension
+  map_depth: 400                  # Z dimension
+  
+  # Obstacle configuration
+  num_obstacles: 50               # More obstacles for 3D space
+  obstacle_radius: 25.0           # Slightly larger for 3D visibility
   clearance_distance: 100.0
+  
+  # Cost function parameters
   cost:
     epsilon_sdf: 10.0
     sigma_obs: 1.0
-  # 3D workspace bounds
-  map_width: 800                  # X dimension
-  map_height: 600                 # Y dimension
-  map_depth: 400                  # Z dimension (NEW)
-  num_obstacles: 50               # Slightly more for 3D space
-  obstacle_radius: 25.0           # Slightly larger for 3D visibility
+  
   # Alternative: specify bounds explicitly
   workspace_bounds:
     x_min: 0.0
@@ -82,68 +31,232 @@ environment:
     z_min: 0.0
     z_max: 400.0
 
-experiment:
-  config_file: config_3d.yaml
-  enable_logging: true
-  log_directory: ./logs_3d
-  random_seed: 900
-  visualize_initial_state: false
-
+# -----------------------------------------------------------------------------
+# Motion Planning Problem Definition (3D)
+# -----------------------------------------------------------------------------
 motion_planning:
+  num_dimensions: 3               # 3D planning
+  num_discretization: 500
+  total_time: 10.0
+  node_collision_radius: 15.0
+  
   # 3D start position [x, y, z]
   start_position:
     - 50.0
     - 550.0
     - 50.0
+  
   # 3D goal position [x, y, z]
   goal_position:
     - 750.0
     - 50.0
     - 350.0
-  node_collision_radius: 15.0
-  num_dimensions: 3               # Changed from 2 to 3
-  num_discretization: 500
-  total_time: 10.0
 
-ngd_planner:
-  cov_scale_final: 0.01
-  cov_scale_initial: 1.0
-  covariance_schedule: cosine
-  ema_alpha: 0.5
-  learning_rate: 1e-4
-  num_iterations: 75              # Increased for 3D convergence
-  num_samples: 150                # More samples for 3D exploration
-  temperature: 1.5
-  temperature_final: 0.05
+# -----------------------------------------------------------------------------
+# Experiment Settings
+# -----------------------------------------------------------------------------
+experiment:
+  config_file: config_3d.yaml
+  random_seed: 900
+  enable_logging: true
+  log_directory: ./logs_3d
+  visualize_initial_state: false
 
-pce_planner:
-  cov_scale_final: 0.01
-  cov_scale_initial: 1.0
-  covariance_schedule: cosine
-  elite_ratio: 0.1
-  ema_alpha: 0.2
-  eta: 1.5
-  num_iterations: 75              # Increased for 3D convergence
-  num_samples: 1500               # More samples for 3D (scales with dimensionality)
-  temperature: 1.5
-  temperature_final: 0.05
+# =============================================================================
+# CasADi Motion Planner Configuration
+# =============================================================================
+casadi_planner:
+  # --- Common Parameters ---
+  solver: ipopt
+  max_iterations: 5000            # Increased for 3D complexity
+  tolerance: 1e-6
+  collision_weight: 10.0
+  finite_diff_eps: 1e-4
+  verbose_solver: true
 
+  # --- L-BFGS Parameters ---
+  lbfgs:
+    history_size: 10
+    max_iterations: 100
+
+  # --- IPOPT Parameters ---
+  ipopt:
+    linear_solver: mumps
+    hessian_approximation: limited-memory
+    acceptable_tol: 1e-4
+    acceptable_iter: 5
+    max_cpu_time: 120.0           # Increased for 3D complexity
+    print_level: 0
+    warm_start_init_point: 'yes'
+
+  # --- SCP Parameters ---
+  scp:
+    max_outer_iter: 50
+    inner_max_iter: 100
+    trust_region_init: 10.0
+    trust_region_min: 1e-4
+    trust_region_max: 1000.0
+    trust_expand: 2.0
+    trust_shrink: 0.5
+    accept_ratio: 0.1
+    good_ratio: 0.75
+    convergence_tol: 1e-4
+
+  # --- SQP Parameters ---
+  sqp:
+    qp_solver: qpoases
+    hessian_approximation: bfgs
+    max_iter_ls: 20
+    beta: 0.5
+    c1: 1e-4
+
+  # --- Gradient Descent Parameters ---
+  gradient_descent:
+    learning_rate: 0.8
+    momentum: 0.9
+    use_nesterov: true
+    lr_decay: 1.0
+
+  # --- Adam Parameters ---
+  adam:
+    learning_rate: 0.8
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1e-8
+
+# =============================================================================
+# STOMP (Stochastic Trajectory Optimization)
+# =============================================================================
 stomp:
-  # Increase exploration
-  num_iterations: 50           # More iterations
-  num_rollouts: 100              # More samples per iteration
+  num_iterations: 50
+  num_rollouts: 100
   max_rollouts: 10
   num_iterations_after_valid: 10
+  noise_stddev: 50.0              # ~5-10% of workspace diagonal
+  noise_decay: 0.98
+  exponentiated_cost_sensitivity: 5.0
+  control_cost_weight: 10.0
+  delta_t: 0.02                   # total_time / num_discretization
+
+# =============================================================================
+# PCE (Proximal Cross-Entropy) Planner - 3D Configuration
+# =============================================================================
+pce_planner:
+  # ---------------------------------------------------------------------------
+  # Core Algorithm Parameters (scaled for 3D)
+  # ---------------------------------------------------------------------------
+  num_iterations: 75              # Increased for 3D convergence
+  num_samples: 150               # More samples for 3D (scales with dimensionality)
+  elite_ratio: 0.5                # Keep top 10% = 150 elites
   
-  # Adjust noise for 800x600 workspace
-  noise_stddev: 50.0            # ~5-10% of workspace diagonal
-  noise_decay: 0.98             # Slower decay
+  # --- Temperature Schedule ---
+  # Lower final temp for tighter convergence in 3D
+  temperature: 1.5
+  temperature_final: 0.05
   
-  # Balance exploration/exploitation
-  exponentiated_cost_sensitivity: 5.0   # More exploration (was 10)
+  # --- Update Parameters ---
+  eta: 1.5                        # Slightly higher regularization for 3D stability
+  ema_alpha: 0.2                  # More conservative blending for 3D
   
-  # Add some smoothness
-  control_cost_weight: 10.0     # Small smoothness weight
+  # --- Convergence ---
+  convergence_threshold: 1e-4
   
-  # Time step
-  delta_t: 0.02                 # 10.0 total_time / 500 nodes = 0.02
+  # --- Collision Parameters ---
+  collision_clearance: 0.1
+  collision_threshold: 0.1
+  
+  # --- Covariance Schedule ---
+  # Tighter final scale for 3D precision
+  covariance_schedule: cosine
+  cov_scale_initial: 1.0
+  cov_scale_final: 0.01
+  cov_decay_rate: 0.9
+  cov_step_interval: 5
+  cov_step_factor: 0.5
+  cov_adaptive_threshold: 0.05
+  
+  # ---------------------------------------------------------------------------
+  # Rollout Reuse Parameters (STOMP-Inspired) - 3D Tuned
+  # ---------------------------------------------------------------------------
+  # Rollout reuse is especially beneficial in 3D where sampling is expensive
+  # ---------------------------------------------------------------------------
+  
+  enable_rollout_reuse: true      # Enable rollout reuse (highly recommended for 3D)
+  
+  # --- Reuse Quantity ---
+  # With 1500 samples and 10% elite ratio = 150 elites
+  # Reusing 50% of elites = 75 rollouts preserved per iteration
+  reuse_ratio: 0.5                # Fraction of elites to reuse
+  num_rollouts_reuse: 0           # 0 = auto-compute (75 for this config)
+  max_rollouts: 0                 # 0 = auto-compute (1576 for this config)
+  
+  # --- Reuse Selection ---
+  # Slightly lower sensitivity for 3D to maintain diversity
+  exponentiated_cost_sensitivity: 8.0   # Lower than 2D (was 10.0)
+                                        # More uniform selection helps 3D exploration
+  
+  # --- Importance Weighting ---
+  # Slightly faster decay in 3D to refresh samples more often
+  importance_weight_decay: 0.85   # Faster decay than 2D (was 0.9)
+  importance_weight_min: 0.15     # Slightly higher threshold (was 0.1)
+
+# =============================================================================
+# PCE Planner Presets for 3D
+# =============================================================================
+
+# --- High Quality 3D (slower, better solutions) ---
+# pce_planner:
+#   num_iterations: 150
+#   num_samples: 3000
+#   elite_ratio: 0.05              # 150 elites
+#   temperature: 1.0
+#   temperature_final: 0.01
+#   eta: 2.0
+#   ema_alpha: 0.15
+#   covariance_schedule: cosine
+#   cov_scale_initial: 1.0
+#   cov_scale_final: 0.005
+#   enable_rollout_reuse: true
+#   reuse_ratio: 0.6
+#   exponentiated_cost_sensitivity: 12.0
+#   importance_weight_decay: 0.88
+#   importance_weight_min: 0.1
+
+# --- Fast 3D (quick approximate solutions) ---
+# pce_planner:
+#   num_iterations: 40
+#   num_samples: 500
+#   elite_ratio: 0.15              # 75 elites
+#   temperature: 2.0
+#   temperature_final: 0.2
+#   eta: 1.0
+#   ema_alpha: 0.3
+#   covariance_schedule: exponential
+#   cov_scale_initial: 2.0
+#   cov_scale_final: 0.05
+#   enable_rollout_reuse: true
+#   reuse_ratio: 0.4
+#   exponentiated_cost_sensitivity: 5.0
+#   importance_weight_decay: 0.8
+#   importance_weight_min: 0.2
+
+# --- No Reuse 3D (vanilla PCE for comparison) ---
+# pce_planner:
+#   num_iterations: 100
+#   num_samples: 2000
+#   elite_ratio: 0.1
+#   enable_rollout_reuse: false
+
+# =============================================================================
+# NGD (Natural Gradient Descent) Planner - 3D Configuration
+# =============================================================================
+ngd_planner:
+  num_iterations: 75              # Increased for 3D convergence
+  num_samples: 150                # More samples for 3D exploration
+  learning_rate: 1e-4
+  temperature: 1.5
+  temperature_final: 0.05
+  ema_alpha: 0.5
+  covariance_schedule: cosine
+  cov_scale_initial: 1.0
+  cov_scale_final: 0.01
