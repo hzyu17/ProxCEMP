@@ -130,114 +130,18 @@ stomp:
   control_cost_weight: 10.0
   delta_t: 0.02                    # total_time / num_discretization
 
-# =============================================================================
-# PCE (Proximal Cross-Entropy) Planner - STOMP-Inspired Version
-# =============================================================================
+# --- PCE (Proximal Cross-Entropy) Planner ---
 pce_planner:
-  # ---------------------------------------------------------------------------
-  # Core Algorithm Parameters
-  # ---------------------------------------------------------------------------
-  num_iterations: 50               # Maximum optimization iterations
-  num_samples: 500                 # Number of trajectory samples per iteration
-  elite_ratio: 0.05                # Fraction of samples to use as elites (0.0-1.0)
-  
-  # --- Temperature Schedule ---
-  # Controls exploration vs exploitation tradeoff
-  # Higher temperature = more uniform weighting across samples
-  temperature: 5.0                 # Initial temperature
-  temperature_final: 1.0           # Final temperature (annealed over iterations)
-  
-  # --- Update Parameters ---
-  eta: 0.5                         # Proximal regularization strength
-                                   # gamma = eta / (eta + 1) is auto-computed
-  ema_alpha: 0.1                   # Exponential moving average blend factor
-                                   # 0 = keep old trajectory, 1 = use new weighted mean
-  
-  # --- Convergence ---
-  convergence_threshold: 1e-4      # Stop if cost change < threshold
-  
-  # --- Collision Parameters ---
-  collision_clearance: 0.1         # Desired clearance from obstacles
-  collision_threshold: 0.1         # Collision detection threshold
-  
-  # --- Covariance Schedule ---
-  # Controls noise magnitude for exploration
-  covariance_schedule: cosine      # Options: constant, linear, exponential, cosine, step, adaptive
-  cov_scale_initial: 10.0          # Initial noise scale
-  cov_scale_final: 0.1             # Final noise scale
-  cov_decay_rate: 0.9              # Decay rate for exponential schedule
-  cov_step_interval: 5             # Interval for step schedule
-  cov_step_factor: 0.5             # Factor for step schedule
-  cov_adaptive_threshold: 0.05     # Threshold for adaptive schedule
-  
-  # ---------------------------------------------------------------------------
-  # Rollout Reuse Parameters (STOMP-Inspired)
-  # ---------------------------------------------------------------------------
-  # These parameters control reusing good samples from previous iterations
-  # instead of generating all new samples. This can significantly improve
-  # convergence speed by preserving promising trajectory regions.
-  # ---------------------------------------------------------------------------
-  
-  enable_rollout_reuse: true       # Enable/disable rollout reuse feature
-                                   # Set to false for vanilla PCE behavior
-  
-  # --- Reuse Quantity ---
-  # Controls how many rollouts to keep from previous iteration
-  # Auto-computed if set to 0: num_rollouts_reuse = num_elites * reuse_ratio
-  reuse_ratio: 0.5                 # Fraction of elites to reuse (0.0-1.0)
-                                   # 0.5 = reuse half of elite samples
-  num_rollouts_reuse: 0            # Explicit count (0 = auto-compute from reuse_ratio)
-  max_rollouts: 0                  # Max rollout storage (0 = auto-compute)
-                                   # Auto: num_samples + num_rollouts_reuse + 1
-  
-  # --- Reuse Selection ---
-  # Controls how rollouts are selected for reuse based on their cost
-  exponentiated_cost_sensitivity: 10.0  # 'h' parameter in exp(-h * normalized_cost)
-                                        # Higher = more selective (prefer best rollouts)
-                                        # Lower = more uniform selection
-                                        # Typical range: 1.0 - 20.0
-  
-  # --- Importance Weighting ---
-  # Reused rollouts have their influence decayed over time to prevent
-  # stale samples from dominating the optimization
-  importance_weight_decay: 0.9     # Multiply weight by this each time reused
-                                   # 0.9 = 90% weight retention per iteration
-  importance_weight_min: 0.1       # Discard rollout when weight falls below this
-                                   # Prevents very stale samples from being used
-
-# =============================================================================
-# PCE Planner Presets
-# =============================================================================
-# Uncomment one of these sections to use predefined parameter sets
-
-# --- High Quality (slower, better solutions) ---
-# pce_planner:
-#   num_iterations: 100
-#   num_samples: 1000
-#   elite_ratio: 0.03
-#   temperature: 3.0
-#   temperature_final: 0.5
-#   enable_rollout_reuse: true
-#   reuse_ratio: 0.6
-#   exponentiated_cost_sensitivity: 15.0
-
-# --- Fast (quick approximate solutions) ---
-# pce_planner:
-#   num_iterations: 20
-#   num_samples: 200
-#   elite_ratio: 0.1
-#   temperature: 8.0
-#   temperature_final: 2.0
-#   enable_rollout_reuse: true
-#   reuse_ratio: 0.4
-#   exponentiated_cost_sensitivity: 5.0
-
-# --- No Reuse (vanilla PCE for comparison) ---
-# pce_planner:
-#   num_iterations: 50
-#   num_samples: 500
-#   elite_ratio: 0.05
-#   enable_rollout_reuse: false
+  num_iterations: 50
+  num_samples: 500
+  elite_ratio: 0.05
+  temperature: 5.0
+  temperature_final: 1.0
+  eta: 0.5
+  ema_alpha: 0.1
+  covariance_schedule: cosine
+  cov_scale_initial: 10.0
+  cov_scale_final: 0.1
 
 # --- NGD (Natural Gradient Descent) Planner ---
 ngd_planner:

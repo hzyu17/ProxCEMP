@@ -146,6 +146,8 @@ pce_planner:
   # Core Algorithm Parameters (scaled for 3D)
   # ---------------------------------------------------------------------------
   num_iterations: 75              # Increased for 3D convergence
+  enable_early_termination: true
+  num_iterations_after_valid: 10
   num_samples: 150               # More samples for 3D (scales with dimensionality)
   elite_ratio: 0.5                # Keep top 10% = 150 elites
   

@@ -138,6 +138,8 @@ pce_planner:
   # Core Algorithm Parameters
   # ---------------------------------------------------------------------------
   num_iterations: 50               # Maximum optimization iterations
+  enable_early_termination: true
+  num_iterations_after_valid: 10
   num_samples: 500                 # Number of trajectory samples per iteration
   elite_ratio: 0.8                # Fraction of samples to use as elites (0.0-1.0)
   

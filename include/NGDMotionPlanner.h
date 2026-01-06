@@ -17,6 +17,7 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm> 
 #include <Eigen/Dense>
+#include <chrono>
 
 /**
  * @brief Configuration for Natural Gradient Descent planner
@@ -297,7 +298,7 @@ public:
             return false;
         }
 
-        log("Update Rule: Y_{k+1} = (1-η)Y_k + η Y_k - η E[S(Ỹ)ε], where Ỹ ~ N(Y_k, R^{-1})");
+        log("Update Rule: Y_{k+1} = Y_k - lr * E[S(Ỹ)ε], where Ỹ ~ N(Y_k, R^{-1})");
         log("");
         
         const size_t N = current_trajectory_.nodes.size();
@@ -319,7 +320,23 @@ public:
         trajectory_history_.clear();
         covariance_scale_history_.clear();
 
+        log("Starting optimization loop...");
+        
+        // Timing
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
+        // Compute initial costs
+        float initial_collision = task_->computeStateCostSimple(current_trajectory_);
+        float initial_smoothness = computeSmoothnessCost(current_trajectory_);
+        
+        logf("Initial: Collision=%.4f, Smoothness=%.4f", initial_collision, initial_smoothness);
+        log("-----------------------------------------------------------------------------------------");
+        log("Iter     |       Cost |  Collision | Smoothness |       LR |     Temp | Time (ms)");
+        log("-----------------------------------------------------------------------------------------");
+
         for (size_t iteration = 1; iteration <= num_iterations_; ++iteration) {
+            auto iter_start = std::chrono::high_resolution_clock::now();
+            
             Eigen::MatrixXf Y_k = trajectoryToMatrix();
 
             // --- Temperature Schedule Calculation ---
@@ -328,7 +345,6 @@ public:
             Eigen::MatrixXf natural_gradient = Eigen::MatrixXf::Zero(D, N);
 
             // 2. Sampling and Evaluation
-            // std::vector<Eigen::MatrixXf> epsilon_samples = sampleNoiseMatrices(M, N, D);
             std::vector<Eigen::MatrixXf> epsilon_samples = sampleScaledNoiseMatrices(M, cov_scale_current_);
             std::vector<Trajectory> sample_trajectories;
             sample_trajectories.reserve(M);
@@ -372,22 +388,48 @@ public:
                 best_iteration = iteration;
             }
 
-            // --- Every 10 steps ---
-            if (iteration == 1 || iteration % 10 == 0 || iteration == num_iterations_) {
-                logf("Iteration %zu - Cost: %.2f (Collision: %.4f, Smoothness: %.4f) LR: %.6f, Temp: %.4f",
-                    iteration, current_total_cost, current_collision, current_smoothness, current_lr, current_temp);
-            }
+            // === LOGGING (every iteration) ===
+            auto iter_end = std::chrono::high_resolution_clock::now();
+            double iter_ms = std::chrono::duration<double, std::milli>(iter_end - iter_start).count();
             
-            if (std::abs(prev_cost - current_total_cost) < convergence_threshold_) break;
+            logf("%4zu     | %10.4f | %10.4f | %10.4f | %8.6f | %8.4f | %9.2f",
+                 iteration, current_total_cost, current_collision, current_smoothness,
+                 current_lr, current_temp, iter_ms);
+            
+            if (std::abs(prev_cost - current_total_cost) < convergence_threshold_) {
+                log("Converged (cost change below threshold)");
+                break;
+            }
             prev_cost = current_total_cost;
             
             task_->postIteration(iteration, current_total_cost, current_trajectory_);
         }
 
-        current_trajectory_ = trajectory_history_[best_iteration-1];
+        // Get actual iterations completed
+        size_t iterations_completed = trajectory_history_.size();
+        
+        log("-----------------------------------------------------------------------------------------");
+        
+        // Total runtime
+        auto end_time = std::chrono::high_resolution_clock::now();
+        double total_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+        double total_sec = total_ms / 1000.0;
+
+        current_trajectory_ = trajectory_history_[best_iteration - 1];
+        
+        // Final costs
+        float final_collision = task_->computeStateCostSimple(current_trajectory_);
+        float final_smoothness = computeSmoothnessCost(current_trajectory_);
+        
+        logf("Final: Collision=%.4f, Smoothness=%.4f, Total=%.4f", 
+             final_collision, final_smoothness, final_collision + final_smoothness);
+        logf("Runtime: %.2f ms (%.3f sec) | %zu iterations | Avg: %.2f ms/iter", 
+             total_ms, total_sec, iterations_completed, 
+             total_ms / static_cast<double>(iterations_completed > 0 ? iterations_completed : 1));
+        logf("NGD best solution at iteration %zu with cost %.4f", best_iteration, best_cost);
+        
         task_->done(true, num_iterations_, best_cost, current_trajectory_);
         return true;
-
     }
 
 
