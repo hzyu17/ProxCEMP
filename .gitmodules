@@ -1,3 +1,6 @@
 [submodule "external/stomp"]
 	path = external/stomp
 	url = https://github.com/ros-industrial/stomp.git
+[submodule "PCEM-PO"]
+	path = PCEM-PO
+	url = https://github.com/hzyu17/PCEM-PO.git
