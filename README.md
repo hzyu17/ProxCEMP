@@ -333,6 +333,41 @@ MoveIt integration is available at: [https://github.com/hzyu17/pce_ros](https://
   </tr>
 </table>
 
+
+### Policy Optimization and python implementation
+
+
+Policy optimization and reinforcement learning applications are available at: [https://github.com/hzyu17/PCEM-PO.git](https://github.com/hzyu17/PCEM-PO.git)
+
+<p align="center">
+  <img src="PCEM-PO/figures/pushT.gif" width="300" alt="PCE for MuJoCo walker2d">
+<img src="PCEM-PO/figures/pushT.png" width="400" alt="Optimization Process">
+</p>
+<p align="center">
+<em>The PushT task.</em>
+</p>
+<p align="center">
+<img src="PCEM-PO/figures/walker2d.gif" width="300" alt="PCE for MuJoCo walker2d">
+<img src="PCEM-PO/figures/walker2d.png" width="400" alt="Optimization Process">
+</p>
+<p align="center">
+<em>The walker2d task.</em>
+</p>
+<p align="center">
+<img src="PCEM-PO/figures/humanoidrunning.gif" width="300" alt="PCE for MuJoCo humanoidstandup">
+<img src="PCEM-PO/figures/humanoidrunning.png" width="400" alt="Optimization Process">
+</p>
+<p align="center">
+<em>The humanoid running task.</em>
+</p>
+<p align="center">
+<img src="PCEM-PO/figures/humanoidstandup.gif" width="300" alt="PCE for MuJoCo humanoidstandup">
+<img src="PCEM-PO/figures/humanoidstandup.png" width="400" alt="Optimization Process">
+</p>
+<p align="center">
+<em>The humanoid standing up task.</em>
+</p>
+
 ---
 
 ## Algorithm Details
